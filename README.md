@@ -2,7 +2,7 @@
 
 > Music discovery and request management for **Navidrome** + **Lidarr** — rebuilt from the ground up as a single fast binary.
 
-MusicSeer 2 is a complete rewrite of [MusicSeer](https://github.com/tkharbeche/musicseer). Same idea — an Overseerr-style request front end for music — but instead of four containers (Next.js + NestJS + Postgres + your patience), it is **one ~9 MB Go binary with the web UI and database built in**. It idles at ~30 MB of RAM and serves every page from a local SQLite cache in single-digit milliseconds.
+MusicSeer 2 is an Overseerr-style request front end for music, built for people running the classic *arr pipeline (Lidarr + Prowlarr + a torrent client). It is **one ~9 MB Go binary with the web UI and database built in**, idles at ~30 MB of RAM, and serves every page from a local SQLite cache in single-digit milliseconds. It began as a ground-up rewrite of [tkharbeche/musicseer](https://github.com/tkharbeche/musicseer) (see docs/COMPARISON.md) and works with or without a Navidrome server.
 
 ## Features
 
@@ -11,7 +11,7 @@ MusicSeer 2 is a complete rewrite of [MusicSeer](https://github.com/tkharbeche/m
 - 💎 **Hidden Gems** — artists your library says you'll love, under 500K listeners
 - 🔎 **Search** — find any artist and request them in one click
 - 📝 **Request workflow** — pending → approved → sent to Lidarr (auto-approve per user), with retry on failure
-- 🔐 **Navidrome login** — family members sign in with the Navidrome credentials they already have
+- 🔐 **Flexible library + login** — Lidarr's artist list doubles as the library source for recommendations (no Navidrome required); add Navidrome for richer signals (stars/ratings) and Navidrome-credential logins
 - ⚙️ **Admin panel** — users, instances (with connection tests and Lidarr profile dropdowns), job status, manual syncs
 - 📦 **Zero-dependency deploy** — one binary, one data directory; Docker image and Proxmox LXC installer included
 
@@ -49,8 +49,8 @@ The script creates an unprivileged Debian 13 container with pinned DNS, installs
 ## First-run checklist
 
 1. Open the web UI → create the **admin account** (setup closes itself afterwards — there is no open registration endpoint).
-2. **Admin → Instances** → add Navidrome (base URL + a Navidrome username/password; tick *login source* if family members should log in with Navidrome credentials).
-3. **Admin → Instances** → add Lidarr (base URL + API key), then pick the **quality profile, metadata profile and root folder** from the dropdowns.
+2. **Admin → Instances** → add Lidarr (base URL + API key), then pick the **quality profile, metadata profile and root folder** from the dropdowns. Lidarr also serves as the library source for recommendations.
+3. *(Optional)* **Admin → Instances** → add Navidrome (base URL + username/password; tick *login source* if family members should log in with Navidrome credentials).
 4. Add your **Last.fm API key** to the environment ([get one free](https://www.last.fm/api/account/create)) and restart.
 5. **Admin → Status** → *Sync library* once; recommendations build automatically after every sync.
 

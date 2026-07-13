@@ -109,6 +109,25 @@ func (l Lidarr) AddArtist(ctx context.Context, baseURL, apiKey, mbid, name strin
 	return created.ID, err
 }
 
+// LidarrArtist is one entry from Lidarr's library.
+type LidarrArtist struct {
+	ArtistName      string `json:"artistName"`
+	ForeignArtistID string `json:"foreignArtistId"`
+	Monitored       bool   `json:"monitored"`
+	Statistics      struct {
+		AlbumCount     int `json:"albumCount"`
+		TrackFileCount int `json:"trackFileCount"`
+	} `json:"statistics"`
+}
+
+// Artists returns every artist in the Lidarr library — used as a library
+// source for recommendations when no Navidrome instance exists.
+func (l Lidarr) Artists(ctx context.Context, baseURL, apiKey string) ([]LidarrArtist, error) {
+	var artists []LidarrArtist
+	err := l.do(ctx, http.MethodGet, baseURL, "/api/v1/artist", apiKey, nil, &artists)
+	return artists, err
+}
+
 // LookupMBID resolves an artist name to a MusicBrainz ID via Lidarr's own
 // search proxy (avoids hitting MusicBrainz directly in the request path).
 func (l Lidarr) LookupMBID(ctx context.Context, baseURL, apiKey, name string) (string, error) {

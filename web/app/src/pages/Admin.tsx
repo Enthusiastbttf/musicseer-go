@@ -118,7 +118,8 @@ function Instances() {
         {items.length === 0 && (
           <div className="p-8 text-center text-sm text-slate-500 space-y-1">
             <p>No instances configured yet.</p>
-            <p>Add your Navidrome server (library + login) and your Lidarr server (requests).</p>
+            <p>Add your Lidarr server (fulfils requests and doubles as the library source for recommendations).</p>
+            <p>Navidrome is optional — add it for richer library signals (stars/ratings) and Navidrome-credential logins.</p>
           </div>
         )}
         {items.map((i) => (
@@ -149,8 +150,8 @@ function Instances() {
               value={editing.type}
               onChange={(e) => setEditing({ ...editing, type: e.target.value as Instance['type'] })}
             >
-              <option value="navidrome">Navidrome (library + login)</option>
-              <option value="lidarr">Lidarr (fulfils requests)</option>
+              <option value="navidrome">Navidrome (optional — library + login)</option>
+              <option value="lidarr">Lidarr (requests + library source)</option>
             </select>
           )}
           <input className="input" placeholder="Display name" value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} required />

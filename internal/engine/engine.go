@@ -153,7 +153,7 @@ func (e *Engine) enrichGenres(ctx context.Context, artists []clients.LFArtist) {
 // ---------- library sync ----------
 
 func (e *Engine) SyncLibraries(ctx context.Context) error {
-	instances, err := e.st.Instances("navidrome")
+	instances, err := e.st.Instances("")
 	if err != nil {
 		return err
 	}
@@ -161,31 +161,60 @@ func (e *Engine) SyncLibraries(ctx context.Context) error {
 		if !inst.IsActive {
 			continue
 		}
-		password, err := e.box.Decrypt(inst.APIKeyEnc)
+		secret, err := e.box.Decrypt(inst.APIKeyEnc)
 		if err != nil {
 			e.log.Warn("cannot decrypt instance credentials", "instance", inst.Name, "err", err)
 			continue
 		}
-		artists, err := e.Sub.GetArtists(ctx, inst.BaseURL, inst.Username, password)
-		if err != nil {
-			e.log.Warn("library sync failed", "instance", inst.Name, "err", err)
+
+		var lib []store.LibraryArtist
+		switch inst.Type {
+		case "navidrome":
+			artists, err := e.Sub.GetArtists(ctx, inst.BaseURL, inst.Username, secret)
+			if err != nil {
+				e.log.Warn("library sync failed", "instance", inst.Name, "err", err)
+				continue
+			}
+			for _, a := range artists {
+				weight := a.AlbumCount // baseline: bigger presence = stronger signal
+				if a.UserRating > 0 {
+					weight = a.UserRating * 10
+				}
+				if a.Starred != "" {
+					weight = 100
+				}
+				lib = append(lib, store.LibraryArtist{Name: a.Name, MBID: a.MBID, Weight: weight})
+			}
+		case "lidarr":
+			// No Navidrome? No problem — Lidarr's artist list IS the library.
+			artists, err := e.Lidarr.Artists(ctx, inst.BaseURL, secret)
+			if err != nil {
+				e.log.Warn("library sync failed", "instance", inst.Name, "err", err)
+				continue
+			}
+			for _, a := range artists {
+				if a.Statistics.TrackFileCount == 0 && !a.Monitored {
+					continue // stub entries with no files and no interest
+				}
+				// Presence-strength: more albums on disk = stronger seed,
+				// monitored artists get a boost (explicit user interest).
+				weight := a.Statistics.AlbumCount * 5
+				if a.Monitored {
+					weight += 20
+				}
+				if weight > 100 {
+					weight = 100
+				}
+				lib = append(lib, store.LibraryArtist{Name: a.ArtistName, MBID: a.ForeignArtistID, Weight: weight})
+			}
+		default:
 			continue
 		}
-		lib := make([]store.LibraryArtist, 0, len(artists))
-		for _, a := range artists {
-			weight := a.AlbumCount // baseline: bigger presence = stronger signal
-			if a.UserRating > 0 {
-				weight = a.UserRating * 10
-			}
-			if a.Starred != "" {
-				weight = 100
-			}
-			lib = append(lib, store.LibraryArtist{Name: a.Name, MBID: a.MBID, Weight: weight})
-		}
+
 		if err := e.st.ReplaceLibrary(inst.ID, lib); err != nil {
 			return err
 		}
-		e.log.Info("library synced", "instance", inst.Name, "artists", len(lib))
+		e.log.Info("library synced", "instance", inst.Name, "type", inst.Type, "artists", len(lib))
 	}
 	// Refresh recommendations for every user now that the library moved.
 	users, err := e.st.Users()
