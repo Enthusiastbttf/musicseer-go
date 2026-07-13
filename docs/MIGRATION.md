@@ -27,7 +27,7 @@ Pick **one** (both are fully supported):
 ```bash
 # on the Proxmox host
 bash deploy/proxmox-create-lxc.sh \
-  --ctid 111 --hostname musicseer \
+  --ctid 112 --hostname musicseer \
   --ip 10.0.10.253/24 --gateway 10.0.10.1 --dns 10.0.10.1 \
   --binary-url https://github.com/Enthusiastbttf/musicseer-go/releases/latest/download/musicseer-linux-amd64
 ```
@@ -63,7 +63,7 @@ From the new instance:
 
 ```bash
 # LXC: 
-pct exec 111 -- /opt/musicseer/musicseer migrate \
+pct exec 112 -- /opt/musicseer/musicseer migrate \
   'postgres://musicseer:PASSWORD@10.0.10.251:5432/musicseer?sslmode=disable'
 
 # Docker:
@@ -122,10 +122,10 @@ You already took a vzdump in Phase 0, so even after destroy you can restore.
 ## Ongoing
 
 - **Backups:** the new app's entire state is `/var/lib/musicseer/`
-  (`musicseer.db` + `secret.key`) — include CT 111 in your normal vzdump
+  (`musicseer.db` + `secret.key`) — include CT 112 in your normal vzdump
   schedule and you're covered.
 - **Updates:** replace the binary, restart the service (or
   `docker compose pull && up -d`). The schema migrates itself.
-- **DNS check habit** (from your build notes): after creating CT 111, verify
-  `pct exec 111 -- grep nameserver /etc/resolv.conf` shows `10.0.10.1` — the
+- **DNS check habit** (from your build notes): after creating CT 112, verify
+  `pct exec 112 -- grep nameserver /etc/resolv.conf` shows `10.0.10.1` — the
   install script pins it, but it costs two seconds to confirm.

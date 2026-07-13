@@ -40,7 +40,7 @@ On the Proxmox host:
 
 ```bash
 bash deploy/proxmox-create-lxc.sh \
-  --ctid 111 --ip 10.0.10.253/24 --gateway 10.0.10.1 --dns 10.0.10.1 \
+  --ctid 112 --ip 10.0.10.253/24 --gateway 10.0.10.1 --dns 10.0.10.1 \
   --binary-url https://github.com/Enthusiastbttf/musicseer-go/releases/latest/download/musicseer-linux-amd64
 ```
 

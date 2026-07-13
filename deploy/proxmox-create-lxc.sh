@@ -9,7 +9,7 @@
 #
 # Usage (defaults shown, tuned for Jonathan's 12U homelab):
 #   bash proxmox-create-lxc.sh \
-#       --ctid 111 \
+#       --ctid 112 \
 #       --ip 10.0.10.253/24 \
 #       --gateway 10.0.10.1 \
 #       --dns 10.0.10.1 \
@@ -21,7 +21,7 @@
 # =============================================================================
 set -euo pipefail
 
-CTID=111
+CTID=112
 IP="10.0.10.253/24"
 GW="10.0.10.1"
 DNS="10.0.10.1"
