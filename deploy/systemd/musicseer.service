@@ -1,0 +1,29 @@
+[Unit]
+Description=MusicSeer 2 — music discovery and requests for Navidrome + Lidarr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=musicseer
+Group=musicseer
+ExecStart=/opt/musicseer/musicseer
+WorkingDirectory=/opt/musicseer
+Environment=MUSICSEER_DATA_DIR=/var/lib/musicseer
+Environment=MUSICSEER_PORT=8688
+EnvironmentFile=-/etc/musicseer/musicseer.env
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/musicseer
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

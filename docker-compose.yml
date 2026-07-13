@@ -1,0 +1,19 @@
+# MusicSeer 2 — single service, single volume. No database container needed.
+services:
+  musicseer:
+    build: .
+    # or, once you publish an image: image: ghcr.io/<your-user>/musicseer:latest
+    container_name: musicseer
+    restart: unless-stopped
+    ports:
+      - "8688:8688"
+    environment:
+      LASTFM_API_KEY: ${LASTFM_API_KEY:?set LASTFM_API_KEY in .env}
+      MUSICBRAINZ_CONTACT: ${MUSICBRAINZ_CONTACT:-admin@example.com}
+      # MUSICSEER_TRENDING_INTERVAL: 6h
+      # MUSICSEER_LIBRARY_INTERVAL: 12h
+    volumes:
+      - musicseer_data:/data
+
+volumes:
+  musicseer_data:

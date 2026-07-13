@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-base text-slate-200 antialiased;
+}
+
+.input {
+  @apply w-full rounded-lg bg-panel border border-white/10 px-3 py-2 text-sm
+    placeholder:text-slate-500 focus:outline-none focus:border-accent/60;
+}
+
+.btn {
+  @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+    transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply btn bg-accent text-white hover:bg-violet-500;
+}
+
+.btn-ghost {
+  @apply btn bg-white/5 hover:bg-white/10 text-slate-200;
+}
+
+.card {
+  @apply bg-panel rounded-2xl border border-white/5;
+}
