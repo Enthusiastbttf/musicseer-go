@@ -2,7 +2,7 @@
 services:
   musicseer:
     build: .
-    # or, once you publish an image: image: ghcr.io/<your-user>/musicseer:latest
+    # or, once you publish an image: image: ghcr.io/Enthusiastbttf/musicseer-go:latest
     container_name: musicseer
     restart: unless-stopped
     ports:

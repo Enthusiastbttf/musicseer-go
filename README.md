@@ -41,7 +41,7 @@ On the Proxmox host:
 ```bash
 bash deploy/proxmox-create-lxc.sh \
   --ctid 111 --ip 10.0.10.253/24 --gateway 10.0.10.1 --dns 10.0.10.1 \
-  --binary-url https://github.com/<you>/<repo>/releases/latest/download/musicseer-linux-amd64
+  --binary-url https://github.com/Enthusiastbttf/musicseer-go/releases/latest/download/musicseer-linux-amd64
 ```
 
 The script creates an unprivileged Debian 13 container with pinned DNS, installs a hardened systemd service, and starts it on port 8688.

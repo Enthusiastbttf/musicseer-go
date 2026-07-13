@@ -15,7 +15,7 @@
 #       --dns 10.0.10.1 \
 #       --bridge vmbr0 \
 #       --storage local-lvm \
-#       --binary-url https://github.com/<you>/<repo>/releases/latest/download/musicseer-linux-amd64
+#       --binary-url https://github.com/Enthusiastbttf/musicseer-go/releases/latest/download/musicseer-linux-amd64
 #
 # A local binary can be used instead of a URL:  --binary /root/musicseer
 # =============================================================================
