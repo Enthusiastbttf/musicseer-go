@@ -50,30 +50,56 @@ func (l *limiter) wait(ctx context.Context) error {
 }
 
 // getJSON performs a rate-limited GET and decodes the JSON response.
+// Transient failures (dropped connections, 429/5xx) are retried twice with
+// backoff — free public APIs like MusicBrainz shed load by hanging up.
 func getJSON(ctx context.Context, lim *limiter, url string, headers map[string]string, out any) error {
-	if lim != nil {
-		if err := lim.wait(ctx); err != nil {
-			return err
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
+		if lim != nil {
+			if err := lim.wait(ctx); err != nil {
+				return err
+			}
+		}
+		body, status, err := doGET(ctx, url, headers)
+		if err != nil {
+			lastErr = err // network-level: dropped conn, EOF, timeout — retry
+			continue
+		}
+		if status == 429 || status >= 500 {
+			lastErr = fmt.Errorf("%s: HTTP %d: %.200s", url, status, string(body))
+			continue
+		}
+		if status >= 400 {
+			return fmt.Errorf("%s: HTTP %d: %.200s", url, status, string(body))
+		}
+		return json.Unmarshal(body, out)
 	}
+	return lastErr
+}
+
+func doGET(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("%s: HTTP %d: %.200s", url, resp.StatusCode, string(body))
-	}
-	return json.Unmarshal(body, out)
+	return body, resp.StatusCode, nil
 }
