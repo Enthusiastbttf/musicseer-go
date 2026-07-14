@@ -130,12 +130,17 @@ func (e *Engine) SyncTrending(ctx context.Context) error {
 			chart = append(chart, chartEntry{a.Name, a.MBID, listeners, playcount})
 		}
 	} else {
-		top, err := e.LB.TopArtists(ctx, "week", 100)
+		// Deezer's public streaming chart: mainstream, keyless, and ships
+		// artist images in the same payload.
+		top, err := e.Deezer.ChartArtists(ctx, 100)
 		if err != nil {
 			return err
 		}
 		for _, a := range top {
-			chart = append(chart, chartEntry{a.Name, a.MBID, 0, a.ListenCount})
+			chart = append(chart, chartEntry{a.Name, "", 0, 0})
+			if a.Picture != "" {
+				e.st.SetArtistImage(a.Name, a.Picture)
+			}
 		}
 	}
 	if len(chart) == 0 {
@@ -151,17 +156,42 @@ func (e *Engine) SyncTrending(ctx context.Context) error {
 	if err := e.st.ReplaceTrending("global", trending); err != nil {
 		return err
 	}
-	e.log.Info("trending synced", "artists", len(trending), "source", map[bool]string{true: "lastfm", false: "listenbrainz"}[e.UsingLastFM()])
-	// Genres enrichment for the top of the chart (rate-limited MusicBrainz).
-	pairs := make([]namedMBID, 0, 25)
-	for _, a := range chart[:min(25, len(chart))] {
-		pairs = append(pairs, namedMBID{a.name, a.mbid})
+	e.log.Info("trending synced", "artists", len(trending), "source", map[bool]string{true: "lastfm", false: "deezer"}[e.UsingLastFM()])
+	// Background enrichment for the top of the chart: resolve missing MBIDs
+	// (Deezer has none — needed for clickable artist pages) + genre tags.
+	head := make([]namedMBID, 0, 40)
+	for _, a := range chart[:min(40, len(chart))] {
+		head = append(head, namedMBID{a.name, a.mbid})
 	}
-	go e.enrichGenres(ctx, pairs)
+	go e.enrichChart(ctx, head)
 	return nil
 }
 
 type namedMBID struct{ name, mbid string }
+
+// enrichChart resolves MusicBrainz IDs and genre tags for chart artists that
+// lack them — rate-limited, cached, converges after the first run.
+func (e *Engine) enrichChart(ctx context.Context, entries []namedMBID) {
+	var pairs []namedMBID
+	for _, a := range entries {
+		mbid := a.mbid
+		if mbid == "" {
+			known, _ := e.st.ArtistsByNames([]string{a.name})
+			if k := known[strings.ToLower(a.name)]; k != nil && k.MBID != "" {
+				mbid = k.MBID
+			} else {
+				found, err := e.MB.SearchArtistMBID(ctx, a.name)
+				if err != nil || found == "" {
+					continue
+				}
+				mbid = found
+				e.st.UpsertArtist(&store.Artist{Name: a.name, MBID: mbid})
+			}
+		}
+		pairs = append(pairs, namedMBID{a.name, mbid})
+	}
+	e.enrichGenres(ctx, pairs)
+}
 
 func (e *Engine) enrichGenres(ctx context.Context, artists []namedMBID) {
 	for _, a := range artists {

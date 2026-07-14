@@ -21,6 +21,26 @@ func deezerBase() string {
 	return "https://api.deezer.com"
 }
 
+// DeezerChartArtist is one entry from Deezer's public streaming charts.
+type DeezerChartArtist struct {
+	Name    string `json:"name"`
+	Picture string `json:"picture_xl"`
+}
+
+// ChartArtists returns Deezer's global top artists — a mainstream chart from
+// tens of millions of listeners, keyless. Used as the trending source when
+// no Last.fm key is configured (ListenBrainz's sitewide chart is heavily
+// skewed by its small, fan-campaign-prone user base).
+func (d *Deezer) ChartArtists(ctx context.Context, limit int) ([]DeezerChartArtist, error) {
+	var resp struct {
+		Data []DeezerChartArtist `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim, deezerBase()+"/chart/0/artists?limit="+fmtInt(limit), nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
 // DeezerTrack is one preview-able track.
 type DeezerTrack struct {
 	Title    string `json:"title"`
