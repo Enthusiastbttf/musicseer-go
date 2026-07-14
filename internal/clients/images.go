@@ -203,6 +203,32 @@ func (m *MusicBrainz) ReleaseGroups(ctx context.Context, artistMBID string) ([]M
 	return out, nil
 }
 
+// ArtistsByTag returns artists carrying a MusicBrainz tag/genre, by relevance.
+func (m *MusicBrainz) ArtistsByTag(ctx context.Context, tag string, limit int) ([]MBSearchResult, error) {
+	var resp struct {
+		Artists []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Score          int    `json:"score"`
+			Disambiguation string `json:"disambiguation"`
+			Country        string `json:"country"`
+			Type           string `json:"type"`
+		} `json:"artists"`
+	}
+	err := getJSON(ctx, m.lim,
+		mbBase()+"/ws/2/artist?limit="+fmtInt(limit)+`&fmt=json&query=tag:`+url.QueryEscape(`"`+tag+`"`),
+		map[string]string{"User-Agent": m.userAgent}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MBSearchResult, 0, len(resp.Artists))
+	for _, a := range resp.Artists {
+		out = append(out, MBSearchResult{Name: a.Name, MBID: a.ID, Score: a.Score,
+			Disambiguation: a.Disambiguation, Country: a.Country, Type: a.Type})
+	}
+	return out, nil
+}
+
 // SearchArtistMBID finds the best-match MBID for an artist name.
 func (m *MusicBrainz) SearchArtistMBID(ctx context.Context, name string) (string, error) {
 	var resp struct {

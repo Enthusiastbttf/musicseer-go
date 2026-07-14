@@ -4,6 +4,7 @@ import { api, User } from './api'
 import Layout from './components/Layout'
 import Admin from './pages/Admin'
 import Artist from './pages/Artist'
+import Genre from './pages/Genre'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Requests from './pages/Requests'
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/search" element={<Search />} />
             <Route path="/artist/:mbid" element={<Artist />} />
+            <Route path="/genre/:name" element={<Genre />} />
             <Route path="/requests" element={<Requests />} />
             {user.role === 'admin' && <Route path="/admin" element={<Admin />} />}
             <Route path="*" element={<Navigate to="/" replace />} />

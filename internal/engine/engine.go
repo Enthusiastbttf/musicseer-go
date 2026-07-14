@@ -245,6 +245,17 @@ func (e *Engine) SyncLibraries(ctx context.Context) error {
 		}
 		e.log.Info("library synced", "instance", inst.Name, "type", inst.Type, "artists", len(lib))
 	}
+	// Enrich genre tags for library artists that lack them (rate-limited MB;
+	// a few dozen per sync — converges after a couple of runs, powers the
+	// "genres to explore" pills).
+	if missing, err := e.st.LibraryArtistsMissingGenres(40); err == nil && len(missing) > 0 {
+		pairs := make([]namedMBID, 0, len(missing))
+		for _, a := range missing {
+			pairs = append(pairs, namedMBID{a.Name, a.MBID})
+		}
+		go e.enrichGenres(ctx, pairs)
+	}
+
 	// Refresh recommendations for every user now that the library moved.
 	users, err := e.st.Users()
 	if err != nil {

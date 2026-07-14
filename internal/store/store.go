@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -661,6 +662,96 @@ func (s *Store) OpenAlbumRequests(artistMbid string) (map[string]bool, error) {
 		set[m] = true
 	}
 	return set, rows.Err()
+}
+
+// LibraryGenres returns genre tags across library artists, most common first.
+func (s *Store) LibraryGenres(limit int) ([]string, error) {
+	rows, err := s.DB.Query(`
+		SELECT a.genres FROM artists a
+		JOIN library_artists la ON lower(la.name) = lower(a.name)
+		WHERE a.genres != '[]'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var g string
+		if err := rows.Scan(&g); err != nil {
+			return nil, err
+		}
+		var genres []string
+		json.Unmarshal([]byte(g), &genres)
+		for _, genre := range genres {
+			counts[strings.ToLower(genre)]++
+		}
+	}
+	type gc struct {
+		g string
+		n int
+	}
+	all := make([]gc, 0, len(counts))
+	for g, n := range counts {
+		all = append(all, gc{g, n})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].n > all[j].n })
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	out := make([]string, len(all))
+	for i, e := range all {
+		out[i] = e.g
+	}
+	return out, rows.Err()
+}
+
+// ---------- genre cache ----------
+
+func (s *Store) GenreCached(genre string, maxAge time.Duration) (json.RawMessage, bool) {
+	var data, cachedAt string
+	if err := s.DB.QueryRow("SELECT data, cached_at FROM genre_cache WHERE genre=?", genre).Scan(&data, &cachedAt); err != nil {
+		return nil, false
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.000Z", cachedAt)
+	if err != nil || time.Since(t) > maxAge {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
+func (s *Store) SaveGenre(genre string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`INSERT INTO genre_cache (genre, data, cached_at) VALUES (?,?,?)
+		ON CONFLICT(genre) DO UPDATE SET data=excluded.data, cached_at=excluded.cached_at`,
+		genre, string(data), now())
+	return err
+}
+
+// LibraryArtistsMissingGenres lists library artists (with MBIDs) whose genre
+// tags haven't been fetched yet — fed to the MusicBrainz enrichment loop.
+func (s *Store) LibraryArtistsMissingGenres(limit int) ([]LibraryArtist, error) {
+	rows, err := s.DB.Query(`
+		SELECT DISTINCT la.name, la.mbid FROM library_artists la
+		LEFT JOIN artists a ON lower(a.name) = lower(la.name)
+		WHERE la.mbid IS NOT NULL AND la.mbid != ''
+		  AND (a.name IS NULL OR a.genres = '[]')
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LibraryArtist
+	for rows.Next() {
+		var a LibraryArtist
+		if err := rows.Scan(&a.Name, &a.MBID); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // ---------- artist detail cache ----------

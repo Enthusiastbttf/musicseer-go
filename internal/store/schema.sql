@@ -113,6 +113,13 @@ CREATE TABLE IF NOT EXISTS user_instances (
     PRIMARY KEY (user_id, instance_id)
 );
 
+-- Cached genre browse results (7-day TTL).
+CREATE TABLE IF NOT EXISTS genre_cache (
+    genre     TEXT PRIMARY KEY COLLATE NOCASE,
+    data      TEXT NOT NULL,
+    cached_at TEXT NOT NULL
+);
+
 -- Cached artist detail pages: bio + discography (7-day TTL).
 CREATE TABLE IF NOT EXISTS artist_detail (
     mbid      TEXT PRIMARY KEY,

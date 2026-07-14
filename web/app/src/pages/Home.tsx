@@ -1,5 +1,6 @@
-import { Gem, RefreshCw, Sparkles, TrendingUp } from 'lucide-react'
+import { Gem, Globe2, RefreshCw, Sparkles, TrendingUp } from 'lucide-react'
 import { ReactNode, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, ArtistItem, RecsResponse } from '../api'
 import ArtistCard from '../components/ArtistCard'
 
@@ -60,6 +61,66 @@ function SkeletonRow() {
 }
 
 
+interface GenresResponse {
+  explore: string[]
+  browse: string[]
+}
+
+// Deterministic gradient per genre so tiles are stable between renders.
+const gradients = [
+  'from-orange-600 to-amber-800', 'from-emerald-600 to-teal-800',
+  'from-pink-600 to-rose-800', 'from-violet-600 to-indigo-800',
+  'from-sky-600 to-blue-800', 'from-red-600 to-orange-800',
+  'from-fuchsia-600 to-purple-800', 'from-lime-600 to-green-800',
+]
+function gradientFor(genre: string) {
+  let h = 0
+  for (const c of genre) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return gradients[h % gradients.length]
+}
+
+function GenresSection() {
+  const [genres, setGenres] = useState<GenresResponse | null>(null)
+  useEffect(() => {
+    api.get<GenresResponse>('/api/discovery/genres').then(setGenres).catch(() => {})
+  }, [])
+  if (!genres) return null
+  return (
+    <section>
+      <div className="flex items-center gap-3 mb-4">
+        <span className="text-accent"><Globe2 size={20} /></span>
+        <h2 className="text-xl font-bold">Genres to Explore</h2>
+        {genres.explore.length > 0 && <span className="text-xs text-slate-500">from your library</span>}
+      </div>
+      {genres.explore.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-6">
+          {genres.explore.map((g) => (
+            <Link
+              key={g}
+              to={`/genre/${encodeURIComponent(g)}`}
+              className={`px-4 py-1.5 rounded-full text-sm font-semibold capitalize text-white bg-gradient-to-br ${gradientFor(g)} hover:opacity-90 transition-opacity`}
+            >
+              {g}
+            </Link>
+          ))}
+        </div>
+      )}
+      <h3 className="text-sm font-semibold text-slate-400 mb-3">Browse by genre</h3>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        {genres.browse.map((g) => (
+          <Link
+            key={g}
+            to={`/genre/${encodeURIComponent(g)}`}
+            className={`h-24 rounded-2xl bg-gradient-to-br ${gradientFor(g)} p-4 flex items-end font-bold capitalize text-white shadow-lg hover:scale-[1.02] transition-transform`}
+          >
+            {g}
+          </Link>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function Home() {
   const [trending, setTrending] = useState<ArtistItem[]>([])
   const [recs, setRecs] = useState<RecsResponse | null>(null)
@@ -113,6 +174,7 @@ export default function Home() {
         loading={loadingGems}
         computing={gems?.computing}
       />
+      <GenresSection />
     </div>
   )
 }

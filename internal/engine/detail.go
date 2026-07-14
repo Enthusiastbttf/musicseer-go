@@ -90,3 +90,48 @@ var ErrNoMBID = jsonErr("could not resolve a MusicBrainz ID for this artist")
 type jsonErr string
 
 func (e jsonErr) Error() string { return string(e) }
+
+// GenreArtist is one entry on a genre browse page.
+type GenreArtist struct {
+	Name           string `json:"name"`
+	MBID           string `json:"mbid,omitempty"`
+	Disambiguation string `json:"disambiguation,omitempty"`
+}
+
+// GetGenreArtists returns artists for a genre tag, cache-first (7-day TTL).
+// Cold fetch = one MusicBrainz tag search.
+func (e *Engine) GetGenreArtists(ctx context.Context, genre string) ([]GenreArtist, error) {
+	if raw, ok := e.st.GenreCached(genre, 7*24*time.Hour); ok {
+		var out []GenreArtist
+		if json.Unmarshal(raw, &out) == nil {
+			return out, nil
+		}
+	}
+	results, err := e.MB.ArtistsByTag(ctx, genre, 24)
+	if err != nil {
+		if raw, ok := e.st.GenreCached(genre, 365*24*time.Hour); ok {
+			var out []GenreArtist
+			if json.Unmarshal(raw, &out) == nil {
+				return out, nil // stale beats an error page
+			}
+		}
+		return nil, err
+	}
+	out := make([]GenreArtist, 0, len(results))
+	for _, a := range results {
+		var parts []string
+		if a.Country != "" {
+			parts = append(parts, a.Country)
+		}
+		if a.Type != "" {
+			parts = append(parts, a.Type)
+		}
+		if a.Disambiguation != "" {
+			parts = append(parts, a.Disambiguation)
+		}
+		out = append(out, GenreArtist{Name: a.Name, MBID: a.MBID, Disambiguation: strings.Join(parts, " · ")})
+		e.enqueueImage(a.Name, a.MBID)
+	}
+	e.st.SaveGenre(genre, out)
+	return out, nil
+}
