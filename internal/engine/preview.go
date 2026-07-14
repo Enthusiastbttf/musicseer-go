@@ -20,9 +20,11 @@ var (
 	previewCache = map[string]previewEntry{}
 )
 
-// Previews returns up to five 30-second sample tracks for an artist.
-func (e *Engine) Previews(ctx context.Context, artist string) ([]clients.DeezerTrack, error) {
-	key := artist
+// Previews returns 30-second sample tracks: an artist's top tracks, or —
+// when album is set — the tracks of that specific album (matched by
+// artist+title, which disambiguates identically-named artists).
+func (e *Engine) Previews(ctx context.Context, artist, album string) ([]clients.DeezerTrack, error) {
+	key := artist + "\x00" + album
 	previewMu.Lock()
 	if entry, ok := previewCache[key]; ok && time.Since(entry.at) < 12*time.Hour {
 		previewMu.Unlock()
@@ -30,7 +32,13 @@ func (e *Engine) Previews(ctx context.Context, artist string) ([]clients.DeezerT
 	}
 	previewMu.Unlock()
 
-	tracks, err := e.Deezer.TopPreviews(ctx, artist, 5)
+	var tracks []clients.DeezerTrack
+	var err error
+	if album != "" {
+		tracks, err = e.Deezer.AlbumPreviews(ctx, artist, album, 12)
+	} else {
+		tracks, err = e.Deezer.TopPreviews(ctx, artist, 5)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -41,6 +41,37 @@ func (d *Deezer) ChartArtists(ctx context.Context, limit int) ([]DeezerChartArti
 	return resp.Data, nil
 }
 
+// AlbumPreviews finds an album by artist+title (a much more precise match
+// than artist name alone) and returns its tracks' 30-second samples.
+func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit int) ([]DeezerTrack, error) {
+	q := `artist:"` + artist + `" album:"` + album + `"`
+	var search struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim, deezerBase()+"/search/album?limit=1&q="+url.QueryEscape(q), nil, &search); err != nil {
+		return nil, err
+	}
+	if len(search.Data) == 0 {
+		return nil, nil
+	}
+	var tracks struct {
+		Data []DeezerTrack `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim,
+		deezerBase()+"/album/"+strconv.FormatInt(search.Data[0].ID, 10)+"/tracks?limit="+fmtInt(limit), nil, &tracks); err != nil {
+		return nil, err
+	}
+	out := make([]DeezerTrack, 0, len(tracks.Data))
+	for _, t := range tracks.Data {
+		if t.Preview != "" {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 // DeezerTrack is one preview-able track.
 type DeezerTrack struct {
 	Title    string `json:"title"`

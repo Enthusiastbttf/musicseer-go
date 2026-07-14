@@ -2,7 +2,7 @@ import { ArrowLeft, Check, Clock, Disc3, Music2, Pause, Play, Plus, Youtube } fr
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
-import { PreviewTrack, playUrl, subscribe } from '../audio'
+import { PreviewTrack, playAlbum, playUrl, subscribe } from '../audio'
 
 interface AlbumEntry {
   mbid: string
@@ -159,16 +159,23 @@ export default function Artist() {
 }
 
 function TopTracks({ artist }: { artist: string }) {
-  const [tracks, setTracks] = useState<PreviewTrack[]>([])
+  const [tracks, setTracks] = useState<PreviewTrack[] | null>(null)
   const [playingKey, setPlayingKey] = useState<string | null>(null)
 
   useEffect(() => {
     api.get<{ tracks: PreviewTrack[] }>(`/api/preview?artist=${encodeURIComponent(artist)}`)
-      .then((r) => setTracks(r.tracks)).catch(() => {})
+      .then((r) => setTracks(r.tracks)).catch(() => setTracks([]))
   }, [artist])
   useEffect(() => subscribe(setPlayingKey), [])
 
-  if (tracks.length === 0) return null
+  if (tracks === null) return null
+  if (tracks.length === 0)
+    return (
+      <p className="text-xs text-slate-600">
+        No samples found on Deezer under this artist name — try the play buttons on individual albums
+        below (matched by album title, more precise) or the YouTube link above.
+      </p>
+    )
   return (
     <section>
       <div className="flex items-center gap-2 mb-3">
@@ -201,8 +208,26 @@ function TopTracks({ artist }: { artist: string }) {
 
 function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail }) {
   const [imgOk, setImgOk] = useState(true)
+  const [playing, setPlaying] = useState(false)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [noPreview, setNoPreview] = useState(false)
+  const previewKey = `album:${artist.name}:${album.title}`
+
+  useEffect(() => subscribe((key) => setPlaying(key === previewKey)), [previewKey])
+
+  const togglePreview = async () => {
+    setPreviewBusy(true)
+    try {
+      const found = await playAlbum(artist.name, album.title)
+      if (!found) setNoPreview(true)
+    } catch {
+      setNoPreview(true)
+    }
+    setPreviewBusy(false)
+  }
+
   return (
-    <div className="card p-3 flex flex-col">
+    <div className="card p-3 flex flex-col group">
       <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
         {album.coverUrl && imgOk ? (
           <img
@@ -220,6 +245,27 @@ function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail 
         {album.owned && (
           <span className="absolute top-2 right-2 text-[10px] font-bold bg-emerald-500/90 text-black rounded-md px-1.5 py-0.5">
             {album.percent && album.percent < 100 ? `${Math.round(album.percent)}%` : 'OWNED'}
+          </span>
+        )}
+        {!noPreview ? (
+          <button
+            onClick={togglePreview}
+            title="Play a 30-second sample from this album"
+            className={`absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center transition-opacity shadow-lg ${
+              playing ? 'bg-accent text-white opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            {previewBusy ? (
+              <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+            ) : playing ? (
+              <Pause size={16} />
+            ) : (
+              <Play size={16} className="ml-0.5" />
+            )}
+          </button>
+        ) : (
+          <span className="absolute bottom-2 right-2 text-[9px] bg-black/70 text-slate-400 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100">
+            no sample
           </span>
         )}
       </div>

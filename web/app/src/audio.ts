@@ -53,6 +53,21 @@ export function playUrl(key: string, url: string) {
   audio.play().catch(() => stop())
 }
 
+/** Fetch an album's previews (artist+title matched) and play the first. */
+export async function playAlbum(artist: string, album: string): Promise<boolean> {
+  const key = `album:${artist}:${album}`
+  if (currentKey === key) {
+    stop()
+    return true
+  }
+  const res = await api.get<{ tracks: PreviewTrack[] }>(
+    `/api/preview?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`,
+  )
+  if (!res.tracks.length) return false
+  playUrl(key, res.tracks[0].preview)
+  return true
+}
+
 /** Fetch an artist's previews and play the first one (toggle behavior). */
 export async function playArtist(artist: string): Promise<boolean> {
   if (currentKey === artist) {

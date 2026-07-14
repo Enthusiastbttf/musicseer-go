@@ -120,7 +120,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, _ *store.
 		jsonError(w, http.StatusBadRequest, "artist required")
 		return
 	}
-	tracks, err := s.eng.Previews(r.Context(), artist)
+	tracks, err := s.eng.Previews(r.Context(), artist, strings.TrimSpace(r.URL.Query().Get("album")))
 	if err != nil {
 		jsonError(w, http.StatusBadGateway, "preview lookup failed: "+err.Error())
 		return
