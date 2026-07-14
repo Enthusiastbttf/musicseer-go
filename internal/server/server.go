@@ -69,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	// Requests
 	mux.HandleFunc("GET /api/requests", s.requireUser(s.handleRequestsList))
 	mux.HandleFunc("POST /api/requests", s.requireUser(s.handleRequestCreate))
+	mux.HandleFunc("POST /api/requests/batch", s.requireUser(s.handleRequestBatch))
 	mux.HandleFunc("POST /api/requests/{id}/approve", s.requireAdmin(s.handleRequestApprove))
 	mux.HandleFunc("POST /api/requests/{id}/reject", s.requireAdmin(s.handleRequestReject))
 	mux.HandleFunc("POST /api/requests/{id}/retry", s.requireAdmin(s.handleRequestRetry))

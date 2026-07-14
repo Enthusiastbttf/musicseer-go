@@ -134,6 +134,162 @@ func (s *Server) handleRequestDelete(w http.ResponseWriter, r *http.Request, u *
 	jsonWrite(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// handleRequestBatch creates several album requests for one artist in a
+// single action (the artist-page album picker). Fulfilment is batched:
+// resolve the artist once, monitor every picked album, one search command.
+func (s *Server) handleRequestBatch(w http.ResponseWriter, r *http.Request, u *store.User) {
+	var body struct {
+		ArtistName string `json:"artistName"`
+		ArtistMBID string `json:"artistMbid"`
+		Albums     []struct {
+			Name string `json:"name"`
+			MBID string `json:"mbid"`
+		} `json:"albums"`
+	}
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.ArtistName) == "" || body.ArtistMBID == "" {
+		jsonError(w, http.StatusBadRequest, "artistName and artistMbid required")
+		return
+	}
+	if len(body.Albums) == 0 || len(body.Albums) > 50 {
+		jsonError(w, http.StatusBadRequest, "pick between 1 and 50 albums")
+		return
+	}
+
+	status := "pending"
+	if u.CanAutoApprove || u.Role == "admin" {
+		status = "approved"
+	}
+	var ids []int64
+	var skipped int
+	for _, a := range body.Albums {
+		if a.MBID == "" || strings.TrimSpace(a.Name) == "" {
+			skipped++
+			continue
+		}
+		id, err := s.st.CreateRequest(u.ID, body.ArtistName, body.ArtistMBID, strings.TrimSpace(a.Name), a.MBID, status)
+		if err != nil {
+			skipped++ // usually the open-request UNIQUE index: already requested
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if status == "approved" && len(ids) > 0 {
+		go s.pushAlbumBatch(ids)
+	}
+	jsonWrite(w, http.StatusCreated, map[string]any{"created": len(ids), "skipped": skipped, "status": status})
+}
+
+// pushAlbumBatch fulfils several same-artist album requests with one Lidarr
+// conversation: ensure artist → wait for album list → monitor picks → search.
+func (s *Server) pushAlbumBatch(requestIDs []int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	reqs := make([]*store.Request, 0, len(requestIDs))
+	for _, id := range requestIDs {
+		if r, err := s.st.RequestByID(id); err == nil {
+			reqs = append(reqs, r)
+		}
+	}
+	if len(reqs) == 0 {
+		return
+	}
+	failAll := func(msg string) {
+		s.log.Warn("lidarr batch push failed", "artist", reqs[0].ArtistName, "err", msg)
+		for _, r := range reqs {
+			s.st.UpdateRequestStatus(r.ID, "failed", "", msg, 0)
+		}
+	}
+
+	inst, err := s.st.FirstActiveInstance("lidarr")
+	if err != nil {
+		failAll("no active Lidarr instance configured")
+		return
+	}
+	apiKey, err := s.box.Decrypt(inst.APIKeyEnc)
+	if err != nil {
+		failAll("cannot decrypt Lidarr API key")
+		return
+	}
+	if inst.RootFolder == "" || inst.QualityProfileID == 0 || inst.MetadataProfileID == 0 {
+		failAll("Lidarr instance is missing root folder / profile configuration — edit it in Admin → Instances")
+		return
+	}
+
+	artistMBID := reqs[0].ArtistMBID
+	artistID, err := s.eng.Lidarr.FindArtistID(ctx, inst.BaseURL, apiKey, artistMBID)
+	if err != nil {
+		failAll("lidarr lookup failed: " + err.Error())
+		return
+	}
+	if artistID == 0 {
+		artistID, err = s.eng.Lidarr.AddArtist(ctx, inst.BaseURL, apiKey, artistMBID, reqs[0].ArtistName,
+			inst.QualityProfileID, inst.MetadataProfileID, inst.RootFolder, "none", false)
+		if err != nil && !errors.Is(err, clients.ErrLidarrDuplicate) {
+			failAll(err.Error())
+			return
+		}
+		if artistID == 0 {
+			artistID, _ = s.eng.Lidarr.FindArtistID(ctx, inst.BaseURL, apiKey, artistMBID)
+		}
+	}
+	if artistID == 0 {
+		failAll("could not find or add the artist in Lidarr")
+		return
+	}
+
+	// Wait for Lidarr's album list to contain every requested release
+	// (or as many as it ever will).
+	wanted := map[string]*store.Request{}
+	for _, r := range reqs {
+		wanted[strings.ToLower(r.AlbumMBID)] = r
+	}
+	found := map[string]int64{} // album mbid -> lidarr album id
+	for attempt := 0; attempt < 60 && len(found) < len(wanted); attempt++ {
+		albums, err := s.eng.Lidarr.Albums(ctx, inst.BaseURL, apiKey, artistID)
+		if err == nil {
+			for _, a := range albums {
+				key := strings.ToLower(a.ForeignAlbumID)
+				if _, want := wanted[key]; want {
+					found[key] = a.ID
+				}
+			}
+		}
+		if len(found) == len(wanted) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(5 * time.Second):
+		}
+	}
+
+	var albumIDs []int64
+	for _, id := range found {
+		albumIDs = append(albumIDs, id)
+	}
+	if len(albumIDs) > 0 {
+		if err := s.eng.Lidarr.MonitorAlbums(ctx, inst.BaseURL, apiKey, albumIDs, true); err != nil {
+			failAll("could not monitor the albums: " + err.Error())
+			return
+		}
+		if err := s.eng.Lidarr.SearchAlbums(ctx, inst.BaseURL, apiKey, albumIDs); err != nil {
+			failAll("albums monitored but search failed to start: " + err.Error())
+			return
+		}
+	}
+	for key, req := range wanted {
+		if lidarrID, ok := found[key]; ok {
+			s.st.UpdateRequestStatus(req.ID, "sent", "", "", lidarrID)
+		} else {
+			s.st.UpdateRequestStatus(req.ID, "failed", "",
+				"Lidarr never listed this album — it may not exist in Lidarr's metadata or is excluded by the metadata profile", 0)
+		}
+	}
+	s.log.Info("album batch sent to lidarr", "artist", reqs[0].ArtistName, "sent", len(found), "of", len(wanted))
+}
+
 // pushToLidarr sends an approved request to the active Lidarr instance.
 // Runs in a goroutine; the request row records the outcome either way.
 func (s *Server) pushToLidarr(requestID int64) {

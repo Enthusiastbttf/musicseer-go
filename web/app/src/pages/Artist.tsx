@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Clock, Disc3, Music2, Pause, Play, Plus, Youtube } from 'lucide-react'
+import { ArrowLeft, Check, CheckSquare, Clock, Disc3, ListPlus, Music2, Pause, Play, Plus, Square, X, Youtube } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
@@ -36,6 +36,49 @@ export default function Artist() {
   const [detail, setDetail] = useState<ArtistDetail | null>(null)
   const [error, setError] = useState('')
   const [bioOpen, setBioOpen] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [batchBusy, setBatchBusy] = useState(false)
+  const [batchMsg, setBatchMsg] = useState('')
+
+  const toggleSelect = (mbid: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(mbid)) next.delete(mbid)
+      else next.add(mbid)
+      return next
+    })
+  }
+
+  const submitBatch = async () => {
+    if (!detail || selected.size === 0) return
+    setBatchBusy(true)
+    setBatchMsg('')
+    try {
+      const albums = detail.albums
+        .filter((a) => selected.has(a.mbid))
+        .map((a) => ({ name: a.title, mbid: a.mbid }))
+      const res = await api.post<{ created: number; skipped: number; status: string }>(
+        '/api/requests/batch',
+        { artistName: detail.name, artistMbid: detail.mbid, albums },
+      )
+      setDetail({
+        ...detail,
+        albums: detail.albums.map((a) => (selected.has(a.mbid) ? { ...a, requested: true } : a)),
+      })
+      setSelected(new Set())
+      setSelecting(false)
+      setBatchMsg(
+        res.status === 'approved'
+          ? `${res.created} album${res.created === 1 ? '' : 's'} sent to Lidarr — track progress on the Requests page.`
+          : `${res.created} request${res.created === 1 ? '' : 's'} submitted for approval.`,
+      )
+    } catch (e) {
+      setBatchMsg(e instanceof Error ? e.message : 'batch request failed')
+    } finally {
+      setBatchBusy(false)
+    }
+  }
 
   useEffect(() => {
     setDetail(null)
@@ -83,6 +126,7 @@ export default function Artist() {
   const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(detail.name)}`
   const ownedCount = detail.albums.filter((a) => a.owned).length
   const totalReleases = detail.albums.length
+  const selectableCount = detail.albums.filter((a) => !a.owned && !a.requested).length
 
   return (
     <div className="max-w-6xl space-y-8">
@@ -109,6 +153,16 @@ export default function Artist() {
             <a href={youtubeUrl} target="_blank" rel="noreferrer" className="btn-ghost" title="Search on YouTube">
               <Youtube size={15} className="text-red-500" /> YouTube
             </a>
+            {selectableCount > 0 && !selecting && (
+              <button className="btn-ghost" onClick={() => setSelecting(true)} title="Pick several albums to request at once">
+                <ListPlus size={15} /> Request albums…
+              </button>
+            )}
+            {selecting && (
+              <button className="btn-ghost text-slate-400" onClick={() => { setSelecting(false); setSelected(new Set()) }}>
+                <X size={15} /> Cancel selection
+              </button>
+            )}
             {detail.inLibrary ? (
               <span
                 className="btn bg-emerald-500/10 text-emerald-400 cursor-default"
@@ -131,6 +185,7 @@ export default function Artist() {
               />
             )}
           </div>
+          {batchMsg && <p className="text-sm text-emerald-400 mt-2">{batchMsg}</p>}
           {bio && (
             <p className="text-sm text-slate-400 mt-4 max-w-3xl leading-relaxed">
               {bioOpen ? bio : shortBio}{' '}
@@ -157,7 +212,14 @@ export default function Artist() {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                 {entries.map((album) => (
-                  <AlbumCard key={album.mbid} album={album} artist={detail} />
+                  <AlbumCard
+                    key={album.mbid}
+                    album={album}
+                    artist={detail}
+                    selecting={selecting}
+                    selected={selected.has(album.mbid)}
+                    onToggle={() => toggleSelect(album.mbid)}
+                  />
                 ))}
               </div>
             </section>
@@ -165,6 +227,20 @@ export default function Artist() {
       )}
       {detail.albums.length === 0 && (
         <div className="card p-8 text-sm text-slate-500">MusicBrainz lists no releases for this artist.</div>
+      )}
+
+      {selecting && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 card px-5 py-3 flex items-center gap-4 shadow-2xl border-accent/30">
+          <span className="text-sm text-slate-300">
+            {selected.size === 0 ? 'Tap albums to select them' : `${selected.size} album${selected.size === 1 ? '' : 's'} selected`}
+          </span>
+          <button className="btn-primary" disabled={selected.size === 0 || batchBusy} onClick={submitBatch}>
+            <Plus size={15} /> {batchBusy ? 'Requesting…' : 'Request selected'}
+          </button>
+          <button className="btn-ghost !px-2.5" onClick={() => { setSelecting(false); setSelected(new Set()) }} title="Cancel">
+            <X size={15} />
+          </button>
+        </div>
       )}
     </div>
   )
@@ -218,7 +294,19 @@ function TopTracks({ artist }: { artist: string }) {
   )
 }
 
-function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail }) {
+function AlbumCard({
+  album,
+  artist,
+  selecting,
+  selected,
+  onToggle,
+}: {
+  album: AlbumEntry
+  artist: ArtistDetail
+  selecting: boolean
+  selected: boolean
+  onToggle: () => void
+}) {
   const [imgOk, setImgOk] = useState(true)
   const [playing, setPlaying] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -238,9 +326,20 @@ function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail 
     setPreviewBusy(false)
   }
 
+  const selectable = selecting && !album.owned && !album.requested
   return (
-    <div className="card p-3 flex flex-col group">
+    <div
+      className={`card p-3 flex flex-col group transition-shadow ${selectable ? 'cursor-pointer' : ''} ${
+        selected ? 'ring-2 ring-accent' : ''
+      } ${selecting && !selectable ? 'opacity-40' : ''}`}
+      onClick={selectable ? onToggle : undefined}
+    >
       <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
+        {selectable && (
+          <span className={`absolute top-2 left-2 z-10 ${selected ? 'text-accent' : 'text-white/70'}`}>
+            {selected ? <CheckSquare size={22} /> : <Square size={22} />}
+          </span>
+        )}
         {album.coverUrl && imgOk ? (
           <img
             src={album.coverUrl}
