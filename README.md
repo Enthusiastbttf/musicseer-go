@@ -1,8 +1,8 @@
-# MusicSeer 2
+# MusicSeer Enhanced
 
 > Music discovery and request management for **Navidrome** + **Lidarr** — rebuilt from the ground up as a single fast binary.
 
-MusicSeer 2 is an Overseerr-style request front end for music, built for people running the classic *arr pipeline (Lidarr + Prowlarr + a torrent client). It needs **no API keys at all** out of the box — discovery runs on the open ListenBrainz + MusicBrainz APIs, and upgrades itself to Last.fm's richer similarity data if you provide a key. It is **one ~9 MB Go binary with the web UI and database built in**, idles at ~30 MB of RAM, and serves every page from a local SQLite cache in single-digit milliseconds. It began as a ground-up rewrite of [tkharbeche/musicseer](https://github.com/tkharbeche/musicseer) (see docs/COMPARISON.md) and works with or without a Navidrome server.
+MusicSeer Enhanced is an Overseerr-style request front end for music, built for people running the classic *arr pipeline (Lidarr + Prowlarr + a torrent client). It needs **no API keys at all** out of the box — discovery runs on the open ListenBrainz + MusicBrainz APIs, and upgrades itself to Last.fm's richer similarity data if you provide a key. It is **one ~9 MB Go binary with the web UI and database built in**, idles at ~30 MB of RAM, and serves every page from a local SQLite cache in single-digit milliseconds. It began as a ground-up rewrite of [tkharbeche/musicseer](https://github.com/tkharbeche/musicseer) (see docs/COMPARISON.md) and works with or without a Navidrome server.
 
 ## Features
 
@@ -54,7 +54,7 @@ The script creates an unprivileged Debian 13 container with pinned DNS, installs
 4. *(Optional)* Add a **Last.fm API key** to the environment ([free](https://www.last.fm/api/account/create)) for Last.fm-based discovery; without one, the keyless ListenBrainz/MusicBrainz backend is used automatically.
 5. **Admin → Status** → *Sync library* once; recommendations build automatically after every sync.
 
-## Migrating from the original MusicSeer
+## Migrating from the original tkharbeche/musicseer (Postgres)
 
 Fully non-destructive — the old Postgres is only ever read:
 

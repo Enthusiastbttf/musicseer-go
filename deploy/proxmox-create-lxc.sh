@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# MusicSeer 2 — Proxmox LXC provisioner
+# MusicSeer Enhanced — Proxmox LXC provisioner
 #
 # Run this ON THE PROXMOX HOST (as root). It creates an unprivileged Debian 13
 # LXC, pins DNS (Tailscale-on-the-host can poison container DNS otherwise —
@@ -123,7 +123,7 @@ fi
 
 cat > /etc/systemd/system/musicseer.service <<"EOF"
 [Unit]
-Description=MusicSeer 2 — music discovery and requests for Navidrome + Lidarr
+Description=MusicSeer Enhanced — music discovery and requests for Lidarr
 After=network-online.target
 Wants=network-online.target
 
@@ -154,7 +154,7 @@ systemctl enable --now musicseer
 IP_ONLY="${IP%%/*}"
 echo
 echo "=============================================================="
-echo " MusicSeer is up:  http://$IP_ONLY:8688"
+echo " MusicSeer Enhanced is up:  http://$IP_ONLY:8688"
 echo
 echo " Next steps:"
 echo "   1. Add your Last.fm API key:"

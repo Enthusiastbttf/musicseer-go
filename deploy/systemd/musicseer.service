@@ -1,5 +1,5 @@
 [Unit]
-Description=MusicSeer 2 — music discovery and requests for Navidrome + Lidarr
+Description=MusicSeer Enhanced — music discovery and requests for Lidarr
 After=network-online.target
 Wants=network-online.target
 

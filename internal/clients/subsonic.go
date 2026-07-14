@@ -24,7 +24,7 @@ func subsonicParams(username, password string) url.Values {
 		"t": {hex.EncodeToString(sum[:])},
 		"s": {salt},
 		"v": {"1.16.1"},
-		"c": {"MusicSeer"},
+		"c": {"MusicSeerEnhanced"},
 		"f": {"json"},
 	}
 }

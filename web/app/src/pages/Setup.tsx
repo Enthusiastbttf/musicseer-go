@@ -34,7 +34,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
             <Gem size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold">Welcome to MusicSeer</h1>
+            <h1 className="text-xl font-bold">Welcome to MusicSeer Enhanced</h1>
             <p className="text-sm text-slate-500">Create the admin account to get started.</p>
           </div>
         </div>

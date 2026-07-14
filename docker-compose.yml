@@ -1,4 +1,4 @@
-# MusicSeer 2 — single service, single volume. No database container needed.
+# MusicSeer Enhanced — single service, single volume. No database container needed.
 services:
   musicseer:
     build: .

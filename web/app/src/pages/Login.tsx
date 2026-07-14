@@ -31,7 +31,10 @@ export default function Login() {
           <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center">
             <Gem size={20} className="text-white" />
           </div>
-          <h1 className="text-xl font-bold">MusicSeer</h1>
+          <div>
+            <h1 className="text-xl font-bold leading-none">MusicSeer</h1>
+            <span className="text-[10px] font-semibold tracking-widest text-accent uppercase">Enhanced</span>
+          </div>
         </div>
         <input className="input" placeholder="Username or email" value={login} onChange={(e) => setLogin(e.target.value)} autoFocus required />
         <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />

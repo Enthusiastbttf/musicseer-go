@@ -18,7 +18,9 @@ export default function Layout() {
           </div>
           <div className="flex flex-col leading-none">
             <span className="text-lg font-bold tracking-tight">MusicSeer</span>
-            {version && <span className="text-[10px] text-slate-500 mt-1">v{version}</span>}
+            <span className="text-[10px] font-semibold tracking-widest text-accent uppercase mt-0.5">
+              Enhanced{version && <span className="text-slate-500 font-normal tracking-normal normal-case"> · v{version}</span>}
+            </span>
           </div>
         </div>
         <nav className="mt-4 space-y-1">

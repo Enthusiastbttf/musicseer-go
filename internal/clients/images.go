@@ -89,7 +89,7 @@ type MusicBrainz struct {
 }
 
 func NewMusicBrainz(contact string) *MusicBrainz {
-	return &MusicBrainz{lim: newLimiter(0.9), userAgent: "MusicSeer/2.0 (" + contact + ")"}
+	return &MusicBrainz{lim: newLimiter(0.9), userAgent: "MusicSeerEnhanced/2 (" + contact + ")"}
 }
 
 // mbBase allows tests to point at a mock server; defaults to production.
