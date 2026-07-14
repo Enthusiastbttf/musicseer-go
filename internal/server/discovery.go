@@ -179,8 +179,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 	libNames, _ := s.st.LibraryNames()
 	reqNames, _ := s.st.RequestedNames()
 	names := make([]string, len(results))
+	nameCount := map[string]int{}
 	for i, a := range results {
 		names[i] = a.name
+		nameCount[strings.ToLower(a.name)]++
 	}
 	meta, _ := s.st.ArtistsByNames(names)
 
@@ -196,14 +198,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 	out := make([]entry, 0, len(results))
 	for _, a := range results {
 		key := strings.ToLower(a.name)
+		ambiguous := nameCount[key] > 1
 		e := entry{Name: a.name, MBID: a.mbid, Disambiguation: a.disamb, InLibrary: libNames[key], Requested: reqNames[key]}
 		if m := meta[key]; m != nil {
-			e.ImageURL, e.Listeners = m.ImageURL, m.Listeners
+			e.Listeners = m.Listeners
+			// The image cache is keyed by NAME. With several identically-named
+			// artists in one result set we cannot know which one the cached
+			// image belongs to — a placeholder is honest, the wrong band's
+			// album art is not.
+			if !ambiguous {
+				e.ImageURL = m.ImageURL
+			}
 			if e.MBID == "" {
 				e.MBID = m.MBID
 			}
 		}
-		if e.ImageURL == "" {
+		if e.ImageURL == "" && !ambiguous {
 			// Backfill artwork in the background so results have images on
 			// the next visit (and often within seconds on this one).
 			s.eng.EnqueueImage(a.name, a.mbid)

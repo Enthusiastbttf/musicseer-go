@@ -18,6 +18,7 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
   const [message, setMessage] = useState('')
   const [playing, setPlaying] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
+  const [noPreview, setNoPreview] = useState(false)
 
   useEffect(() => subscribe((key) => setPlaying(key === artist.name)), [artist.name])
 
@@ -26,8 +27,11 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
     e.stopPropagation()
     setPreviewBusy(true)
     try {
-      await playArtist(artist.name)
-    } catch { /* no previews available */ }
+      const found = await playArtist(artist.name)
+      if (!found) setNoPreview(true)
+    } catch {
+      setNoPreview(true)
+    }
     setPreviewBusy(false)
   }
 
@@ -77,21 +81,27 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
     <div className="card p-3 group flex flex-col">
       <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
         {detailUrl ? <Link to={detailUrl}>{artwork}</Link> : artwork}
-        <button
-          onClick={togglePreview}
-          title="Play a 30-second sample"
-          className={`absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center transition-opacity shadow-lg ${
-            playing ? 'bg-accent text-white opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
-          }`}
-        >
-          {previewBusy ? (
-            <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-          ) : playing ? (
-            <Pause size={16} />
-          ) : (
-            <Play size={16} className="ml-0.5" />
-          )}
-        </button>
+        {noPreview ? (
+          <span className="absolute bottom-2 right-2 text-[9px] bg-black/70 text-slate-400 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100">
+            no sample
+          </span>
+        ) : (
+          <button
+            onClick={togglePreview}
+            title="Play a 30-second sample (matched by artist name — for identically-named artists, use the album play buttons on the artist page instead)"
+            className={`absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center transition-opacity shadow-lg ${
+              playing ? 'bg-accent text-white opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            {previewBusy ? (
+              <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+            ) : playing ? (
+              <Pause size={16} />
+            ) : (
+              <Play size={16} className="ml-0.5" />
+            )}
+          </button>
+        )}
       </div>
       {detailUrl ? (
         <Link to={detailUrl} className="font-semibold text-sm truncate hover:text-accent hover:underline" title={artist.name}>
