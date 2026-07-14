@@ -153,14 +153,9 @@ export default function Artist() {
             <a href={youtubeUrl} target="_blank" rel="noreferrer" className="btn-ghost" title="Search on YouTube">
               <Youtube size={15} className="text-red-500" /> YouTube
             </a>
-            {selectableCount > 0 && !selecting && (
+            {selectableCount > 0 && (
               <button className="btn-ghost" onClick={() => setSelecting(true)} title="Pick several albums to request at once">
                 <ListPlus size={15} /> Request albums…
-              </button>
-            )}
-            {selecting && (
-              <button className="btn-ghost text-slate-400" onClick={() => { setSelecting(false); setSelected(new Set()) }}>
-                <X size={15} /> Cancel selection
               </button>
             )}
             {detail.inLibrary ? (
@@ -212,14 +207,7 @@ export default function Artist() {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                 {entries.map((album) => (
-                  <AlbumCard
-                    key={album.mbid}
-                    album={album}
-                    artist={detail}
-                    selecting={selecting}
-                    selected={selected.has(album.mbid)}
-                    onToggle={() => toggleSelect(album.mbid)}
-                  />
+                  <AlbumCard key={album.mbid} album={album} artist={detail} />
                 ))}
               </div>
             </section>
@@ -230,16 +218,60 @@ export default function Artist() {
       )}
 
       {selecting && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 card px-5 py-3 flex items-center gap-4 shadow-2xl border-accent/30">
-          <span className="text-sm text-slate-300">
-            {selected.size === 0 ? 'Tap albums to select them' : `${selected.size} album${selected.size === 1 ? '' : 's'} selected`}
-          </span>
-          <button className="btn-primary" disabled={selected.size === 0 || batchBusy} onClick={submitBatch}>
-            <Plus size={15} /> {batchBusy ? 'Requesting…' : 'Request selected'}
-          </button>
-          <button className="btn-ghost !px-2.5" onClick={() => { setSelecting(false); setSelected(new Set()) }} title="Cancel">
-            <X size={15} />
-          </button>
+        <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+             onClick={() => { setSelecting(false); setSelected(new Set()) }}>
+          <div className="card w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl border-accent/20"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+              <div>
+                <h3 className="font-bold">Request albums</h3>
+                <p className="text-xs text-slate-500">{detail.name} — pick everything you want, one submit</p>
+              </div>
+              <button className="btn-ghost !px-2.5" onClick={() => { setSelecting(false); setSelected(new Set()) }}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="overflow-y-auto divide-y divide-white/5 flex-1">
+              {detail.albums.filter((a) => !a.owned && !a.requested).map((a) => {
+                const isSel = selected.has(a.mbid)
+                return (
+                  <button
+                    key={a.mbid}
+                    onClick={() => toggleSelect(a.mbid)}
+                    className={`w-full flex items-center gap-3 px-5 py-2.5 text-left transition-colors ${
+                      isSel ? 'bg-accent/10' : 'hover:bg-white/5'
+                    }`}
+                  >
+                    <span className={isSel ? 'text-accent' : 'text-slate-500'}>
+                      {isSel ? <CheckSquare size={19} /> : <Square size={19} />}
+                    </span>
+                    <span className="w-9 h-9 rounded-md overflow-hidden bg-white/5 shrink-0">
+                      {a.coverUrl && <img src={a.coverUrl} alt="" loading="lazy" className="w-full h-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium truncate">{a.title}</span>
+                      <span className="block text-xs text-slate-500">{a.year || '—'} · {a.type}{a.secondaryTypes?.length ? ` · ${a.secondaryTypes.join(', ')}` : ''}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex items-center gap-2 px-5 py-4 border-t border-white/5">
+              <button
+                className="btn-ghost text-xs"
+                onClick={() => {
+                  const all = detail.albums.filter((a) => !a.owned && !a.requested).map((a) => a.mbid)
+                  setSelected(selected.size === all.length ? new Set() : new Set(all))
+                }}
+              >
+                {selected.size === detail.albums.filter((a) => !a.owned && !a.requested).length ? 'Clear all' : 'Select all'}
+              </button>
+              <span className="ml-auto text-sm text-slate-400">{selected.size} selected</span>
+              <button className="btn-primary" disabled={selected.size === 0 || batchBusy} onClick={submitBatch}>
+                <Plus size={15} /> {batchBusy ? 'Requesting…' : 'Request selected'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -294,19 +326,7 @@ function TopTracks({ artist }: { artist: string }) {
   )
 }
 
-function AlbumCard({
-  album,
-  artist,
-  selecting,
-  selected,
-  onToggle,
-}: {
-  album: AlbumEntry
-  artist: ArtistDetail
-  selecting: boolean
-  selected: boolean
-  onToggle: () => void
-}) {
+function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail }) {
   const [imgOk, setImgOk] = useState(true)
   const [playing, setPlaying] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -326,20 +346,9 @@ function AlbumCard({
     setPreviewBusy(false)
   }
 
-  const selectable = selecting && !album.owned && !album.requested
   return (
-    <div
-      className={`card p-3 flex flex-col group transition-shadow ${selectable ? 'cursor-pointer' : ''} ${
-        selected ? 'ring-2 ring-accent' : ''
-      } ${selecting && !selectable ? 'opacity-40' : ''}`}
-      onClick={selectable ? onToggle : undefined}
-    >
+    <div className="card p-3 flex flex-col group">
       <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
-        {selectable && (
-          <span className={`absolute top-2 left-2 z-10 ${selected ? 'text-accent' : 'text-white/70'}`}>
-            {selected ? <CheckSquare size={22} /> : <Square size={22} />}
-          </span>
-        )}
         {album.coverUrl && imgOk ? (
           <img
             src={album.coverUrl}
