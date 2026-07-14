@@ -137,7 +137,9 @@ func (s *Server) handleRequestDelete(w http.ResponseWriter, r *http.Request, u *
 // pushToLidarr sends an approved request to the active Lidarr instance.
 // Runs in a goroutine; the request row records the outcome either way.
 func (s *Server) pushToLidarr(requestID int64) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Album requests may wait on Lidarr fetching a new artist's full
+	// discography from its metadata service — minutes for prolific artists.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	req, err := s.st.RequestByID(requestID)
@@ -227,7 +229,7 @@ func (s *Server) pushAlbumToLidarr(ctx context.Context, requestID int64, req *st
 	// Lidarr populates albums asynchronously after an artist is added — poll
 	// briefly until the requested release group shows up.
 	var albumID int64
-	for attempt := 0; attempt < 12; attempt++ {
+	for attempt := 0; attempt < 60; attempt++ { // up to ~5 minutes
 		albums, err := s.eng.Lidarr.Albums(ctx, inst.BaseURL, apiKey, artistID)
 		if err == nil {
 			for _, a := range albums {
@@ -248,7 +250,7 @@ func (s *Server) pushAlbumToLidarr(ctx context.Context, requestID int64, req *st
 		}
 	}
 	if albumID == 0 {
-		fail("Lidarr did not list this album for the artist (it may still be refreshing — retry in a minute)")
+		fail("Lidarr never listed this album for the artist — it may not exist in Lidarr's metadata; retry once, then check the artist in Lidarr directly")
 		return
 	}
 
