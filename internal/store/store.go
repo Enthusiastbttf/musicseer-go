@@ -573,6 +573,13 @@ func (s *Store) SimilarCached(source string, maxAge time.Duration) ([]SimilarArt
 	return out, true
 }
 
+// ClearSimilar wipes the similar-artist cache — used when the discovery
+// backend switches (Last.fm vs ListenBrainz scores are not comparable).
+func (s *Store) ClearSimilar() error {
+	_, err := s.DB.Exec("DELETE FROM similar")
+	return err
+}
+
 func (s *Store) SaveSimilar(source string, artists []SimilarArtist) error {
 	data, _ := json.Marshal(artists)
 	_, err := s.DB.Exec(`INSERT INTO similar (source, data, cached_at) VALUES (?,?,?)

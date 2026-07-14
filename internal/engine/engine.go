@@ -47,9 +47,8 @@ type Engine struct {
 type imageJob struct{ name, mbid string }
 
 func New(cfg config.Config, st *store.Store, box *secrets.Box, log *slog.Logger) *Engine {
-	return &Engine{
+	e := &Engine{
 		cfg: cfg, st: st, box: box, log: log,
-		LastFM:     clients.NewLastFM(cfg.LastFMKey),
 		LB:         clients.NewListenBrainz(),
 		Deezer:     clients.NewDeezer(),
 		AudioDB:    clients.NewAudioDB(),
@@ -57,11 +56,25 @@ func New(cfg config.Config, st *store.Store, box *secrets.Box, log *slog.Logger)
 		imageQueue: make(chan imageJob, 4096),
 		status:     map[string]string{},
 	}
+	e.LastFM = clients.NewLastFM(e.LastFMKey)
+	return e
+}
+
+// LastFMKey returns the active Last.fm API key: the admin-configured one
+// (stored encrypted in settings) wins; the LASTFM_API_KEY env var is the
+// fallback. Empty = keyless discovery backends.
+func (e *Engine) LastFMKey() string {
+	if enc := e.st.Setting("lastfm_api_key"); enc != "" {
+		if k, err := e.box.Decrypt(enc); err == nil && k != "" {
+			return k
+		}
+	}
+	return e.cfg.LastFMKey
 }
 
 // UsingLastFM reports whether a Last.fm key is configured; without one the
 // engine runs on the keyless ListenBrainz/MusicBrainz backends.
-func (e *Engine) UsingLastFM() bool { return e.cfg.LastFMKey != "" }
+func (e *Engine) UsingLastFM() bool { return e.LastFMKey() != "" }
 
 func (e *Engine) setStatus(job, outcome string) {
 	e.mu.Lock()

@@ -66,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/plex/poll", s.handlePlexPoll)
 	mux.HandleFunc("GET /api/admin/plex", s.requireAdmin(s.handlePlexConfigGet))
 	mux.HandleFunc("POST /api/admin/plex", s.requireAdmin(s.handlePlexConfigSet))
+	mux.HandleFunc("GET /api/admin/lastfm", s.requireAdmin(s.handleLastfmGet))
+	mux.HandleFunc("POST /api/admin/lastfm", s.requireAdmin(s.handleLastfmSet))
 
 	// Requests
 	mux.HandleFunc("GET /api/requests", s.requireUser(s.handleRequestsList))

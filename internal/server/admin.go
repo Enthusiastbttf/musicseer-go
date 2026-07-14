@@ -6,6 +6,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"musicseer/internal/clients"
 	"musicseer/internal/store"
 )
 
@@ -300,6 +301,63 @@ func (s *Server) handleLidarrOptions(w http.ResponseWriter, r *http.Request, _ *
 		"metadataProfiles": metadata,
 		"rootFolders":      roots,
 	})
+}
+
+// ---------- Last.fm ----------
+
+// handleLastfmGet reports whether/where a Last.fm key is configured.
+func (s *Server) handleLastfmGet(w http.ResponseWriter, _ *http.Request, _ *store.User) {
+	source := "none"
+	if s.st.Setting("lastfm_api_key") != "" {
+		source = "admin"
+	} else if s.eng.LastFMKey() != "" {
+		source = "env"
+	}
+	jsonWrite(w, http.StatusOK, map[string]any{
+		"configured": s.eng.UsingLastFM(),
+		"source":     source,
+	})
+}
+
+// handleLastfmSet validates and stores (encrypted) a Last.fm API key at
+// runtime — no restart needed. Empty key removes the admin-configured one.
+// On any change the similarity cache is cleared (Last.fm and ListenBrainz
+// scores are not comparable) and background refreshes are kicked off.
+func (s *Server) handleLastfmSet(w http.ResponseWriter, r *http.Request, u *store.User) {
+	var body struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	body.APIKey = strings.TrimSpace(body.APIKey)
+
+	if body.APIKey == "" {
+		s.st.SetSetting("lastfm_api_key", "")
+	} else {
+		// Validate against Last.fm before saving.
+		probe := clients.NewLastFM(func() string { return body.APIKey })
+		if _, err := probe.TopArtists(r.Context(), 1); err != nil {
+			jsonError(w, http.StatusBadRequest, "Last.fm rejected this key: "+err.Error())
+			return
+		}
+		enc, err := s.box.Encrypt(body.APIKey)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.st.SetSetting("lastfm_api_key", enc)
+	}
+
+	// Backend switched: stale similarity scores are meaningless now.
+	s.st.ClearSimilar()
+	ctx := contextWithoutCancel(r)
+	go s.eng.SyncTrending(ctx)
+	s.eng.RefreshUserAsync(u.ID)
+
+	s.log.Info("lastfm key updated", "configured", s.eng.UsingLastFM())
+	s.handleLastfmGet(w, r, u)
 }
 
 // ---------- stats & manual sync ----------

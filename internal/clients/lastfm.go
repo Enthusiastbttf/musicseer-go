@@ -3,20 +3,28 @@ package clients
 import (
 	"context"
 	"net/url"
+	"os"
 	"strconv"
 )
 
 // LastFM client. Last.fm asks for no more than 5 req/s averaged.
+// The key is read through a provider function so it can be changed at
+// runtime (admin UI) without restarting the process.
 type LastFM struct {
-	APIKey string
-	lim    *limiter
+	keyFunc func() string
+	lim     *limiter
 }
 
-func NewLastFM(apiKey string) *LastFM {
-	return &LastFM{APIKey: apiKey, lim: newLimiter(4)}
+func NewLastFM(keyFunc func() string) *LastFM {
+	return &LastFM{keyFunc: keyFunc, lim: newLimiter(4)}
 }
 
-const lastfmBase = "https://ws.audioscrobbler.com/2.0/"
+func lastfmBaseURL() string {
+	if b := os.Getenv("MUSICSEER_LASTFM_BASE"); b != "" { // test hook
+		return b
+	}
+	return "https://ws.audioscrobbler.com/2.0/"
+}
 
 type LFArtist struct {
 	Name      string `json:"name"`
@@ -27,9 +35,9 @@ type LFArtist struct {
 }
 
 func (l *LastFM) call(ctx context.Context, params url.Values, out any) error {
-	params.Set("api_key", l.APIKey)
+	params.Set("api_key", l.keyFunc())
 	params.Set("format", "json")
-	return getJSON(ctx, l.lim, lastfmBase+"?"+params.Encode(), nil, out)
+	return getJSON(ctx, l.lim, lastfmBaseURL()+"?"+params.Encode(), nil, out)
 }
 
 func (l *LastFM) TopArtists(ctx context.Context, limit int) ([]LFArtist, error) {

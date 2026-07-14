@@ -3,7 +3,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api, Instance, User } from '../api'
 import { useAuth } from '../App'
 
-type Tab = 'instances' | 'users' | 'plex' | 'status'
+type Tab = 'instances' | 'users' | 'connections' | 'status'
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('instances')
@@ -11,7 +11,7 @@ export default function Admin() {
     <div className="space-y-6 max-w-5xl">
       <h1 className="text-2xl font-bold">Admin</h1>
       <div className="flex gap-2">
-        {(['instances', 'users', 'plex', 'status'] as Tab[]).map((t) => (
+        {(['instances', 'users', 'connections', 'status'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -23,7 +23,12 @@ export default function Admin() {
       </div>
       {tab === 'instances' && <Instances />}
       {tab === 'users' && <Users />}
-      {tab === 'plex' && <PlexConfig />}
+      {tab === 'connections' && (
+        <div className="space-y-4">
+          <LastfmConfig />
+          <PlexConfig />
+        </div>
+      )}
       {tab === 'status' && <Status />}
     </div>
   )
@@ -342,6 +347,82 @@ function Users() {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ---------------- last.fm ----------------
+
+function LastfmConfig() {
+  const [config, setConfig] = useState<{ configured: boolean; source: string } | null>(null)
+  const [key, setKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const load = useCallback(() => api.get<{ configured: boolean; source: string }>('/api/admin/lastfm').then(setConfig), [])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const save = async (apiKey: string) => {
+    setBusy(true)
+    setMessage('')
+    try {
+      await api.post('/api/admin/lastfm', { apiKey })
+      setKey('')
+      setMessage(
+        apiKey
+          ? 'Key validated and saved — discovery switched to Last.fm. Trending is resyncing and recommendations will rebuild in the background.'
+          : 'Key removed — discovery switched back to the keyless backends.',
+      )
+      load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!config) return <p className="text-sm text-slate-500">Loading…</p>
+
+  return (
+    <div className="card p-6 space-y-3 max-w-2xl">
+      <h3 className="font-bold">Last.fm</h3>
+      <p className="text-sm text-slate-400">
+        Without a key, discovery runs on the keyless Deezer / ListenBrainz / MusicBrainz backends.
+        A free Last.fm API key upgrades trending, similar-artist data and search to Last.fm's richer
+        listening graph — paste it here whenever you manage to create an account
+        (<a className="text-accent hover:underline" href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer">last.fm/api/account/create</a>).
+        The key is validated live, stored encrypted, and applied without a restart.
+      </p>
+      <div className="text-sm">
+        <span className="text-slate-400">Status:</span>{' '}
+        {config.configured ? (
+          <span className="text-emerald-400 font-semibold">
+            active{config.source === 'env' ? ' (from environment variable)' : ' (configured here)'}
+          </span>
+        ) : (
+          <span className="text-slate-300">keyless mode</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          className="input flex-1"
+          type="password"
+          placeholder="Last.fm API key"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+        />
+        <button className="btn-primary" disabled={!key.trim() || busy} onClick={() => save(key.trim())}>
+          {busy ? 'Validating…' : 'Validate & save'}
+        </button>
+        {config.source === 'admin' && (
+          <button className="btn-ghost" disabled={busy} onClick={() => save('')}>
+            Remove
+          </button>
+        )}
+      </div>
+      {message && <p className="text-sm text-slate-400">{message}</p>}
     </div>
   )
 }
