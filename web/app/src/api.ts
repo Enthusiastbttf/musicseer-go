@@ -62,6 +62,8 @@ export interface RequestItem {
   username: string
   artistName: string
   artistMbid?: string
+  albumName?: string
+  albumMbid?: string
   status: 'pending' | 'approved' | 'rejected' | 'sent' | 'failed'
   notes?: string
   error?: string

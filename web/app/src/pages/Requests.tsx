@@ -64,7 +64,10 @@ export default function Requests() {
           {items.map((r) => (
             <div key={r.id} className="flex items-center gap-4 p-4">
               <div className="min-w-0 flex-1">
-                <div className="font-semibold text-sm truncate">{r.artistName}</div>
+                <div className="font-semibold text-sm truncate">
+                  {r.artistName}
+                  {r.albumName && <span className="text-slate-400 font-normal"> — {r.albumName}</span>}
+                </div>
                 <div className="text-xs text-slate-500">
                   {showAll && <span className="mr-2">by {r.username}</span>}
                   {new Date(r.createdAt).toLocaleString()}
