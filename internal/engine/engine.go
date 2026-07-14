@@ -35,6 +35,7 @@ type Engine struct {
 	MB      *clients.MusicBrainz
 	Sub     clients.Subsonic
 	Lidarr  clients.Lidarr
+	Plex    clients.PlexTV
 
 	imageQueue chan imageJob
 	inflight   sync.Map // dedup for async refresh triggers

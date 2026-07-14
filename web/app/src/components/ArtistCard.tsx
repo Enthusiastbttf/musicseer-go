@@ -1,7 +1,8 @@
-import { Check, Clock, Music2, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { Check, Clock, Music2, Pause, Play, Plus } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, ArtistItem } from '../api'
+import { playArtist, subscribe } from '../audio'
 
 function formatListeners(n?: number) {
   if (!n) return null
@@ -15,6 +16,20 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
     artist.requested ? 'requested' : 'idle',
   )
   const [message, setMessage] = useState('')
+  const [playing, setPlaying] = useState(false)
+  const [previewBusy, setPreviewBusy] = useState(false)
+
+  useEffect(() => subscribe((key) => setPlaying(key === artist.name)), [artist.name])
+
+  const togglePreview = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setPreviewBusy(true)
+    try {
+      await playArtist(artist.name)
+    } catch { /* no previews available */ }
+    setPreviewBusy(false)
+  }
 
   const request = async () => {
     setState('busy')
@@ -62,6 +77,21 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
     <div className="card p-3 group flex flex-col">
       <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
         {detailUrl ? <Link to={detailUrl}>{artwork}</Link> : artwork}
+        <button
+          onClick={togglePreview}
+          title="Play a 30-second sample"
+          className={`absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center transition-opacity shadow-lg ${
+            playing ? 'bg-accent text-white opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
+          }`}
+        >
+          {previewBusy ? (
+            <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+          ) : playing ? (
+            <Pause size={16} />
+          ) : (
+            <Play size={16} className="ml-0.5" />
+          )}
+        </button>
       </div>
       {detailUrl ? (
         <Link to={detailUrl} className="font-semibold text-sm truncate hover:text-accent hover:underline" title={artist.name}>

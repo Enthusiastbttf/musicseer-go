@@ -14,6 +14,49 @@ type Deezer struct{ lim *limiter }
 
 func NewDeezer() *Deezer { return &Deezer{lim: newLimiter(5)} }
 
+func deezerBase() string {
+	if b := os.Getenv("MUSICSEER_DEEZER_BASE"); b != "" { // test hook
+		return b
+	}
+	return "https://api.deezer.com"
+}
+
+// DeezerTrack is one preview-able track.
+type DeezerTrack struct {
+	Title    string `json:"title"`
+	Preview  string `json:"preview"` // 30s MP3 sample URL
+	Duration int    `json:"duration"`
+}
+
+// TopPreviews returns an artist's top tracks with 30-second sample URLs.
+func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]DeezerTrack, error) {
+	var search struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit=1&q="+url.QueryEscape(name), nil, &search); err != nil {
+		return nil, err
+	}
+	if len(search.Data) == 0 {
+		return nil, nil
+	}
+	var top struct {
+		Data []DeezerTrack `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim,
+		deezerBase()+"/artist/"+strconv.FormatInt(search.Data[0].ID, 10)+"/top?limit="+fmtInt(limit), nil, &top); err != nil {
+		return nil, err
+	}
+	out := make([]DeezerTrack, 0, len(top.Data))
+	for _, t := range top.Data {
+		if t.Preview != "" {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (d *Deezer) ArtistImage(ctx context.Context, name string) (string, error) {
 	var resp struct {
 		Data []struct {
@@ -23,7 +66,7 @@ func (d *Deezer) ArtistImage(ctx context.Context, name string) (string, error) {
 			PictureMd string `json:"picture_medium"`
 		} `json:"data"`
 	}
-	err := getJSON(ctx, d.lim, "https://api.deezer.com/search/artist?limit=1&q="+url.QueryEscape(name), nil, &resp)
+	err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit=1&q="+url.QueryEscape(name), nil, &resp)
 	if err != nil || len(resp.Data) == 0 {
 		return "", err
 	}

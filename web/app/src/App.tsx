@@ -14,6 +14,7 @@ import Setup from './pages/Setup'
 interface AuthState {
   user: User | null
   version: string
+  plexLogin: boolean
   setUser: (u: User | null) => void
   logout: () => Promise<void>
 }
@@ -25,6 +26,7 @@ interface Status {
   setupComplete: boolean
   user?: User
   version?: string
+  plexLogin?: boolean
 }
 
 export default function App() {
@@ -32,6 +34,7 @@ export default function App() {
   const [setupComplete, setSetupComplete] = useState(true)
   const [user, setUser] = useState<User | null>(null)
   const [version, setVersion] = useState('')
+  const [plexLogin, setPlexLogin] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -41,6 +44,7 @@ export default function App() {
         setSetupComplete(s.setupComplete)
         setUser(s.user ?? null)
         setVersion(s.version ?? '')
+        setPlexLogin(s.plexLogin ?? false)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -63,7 +67,7 @@ export default function App() {
   }
 
   return (
-    <AuthContext.Provider value={{ user, version, setUser, logout }}>
+    <AuthContext.Provider value={{ user, version, plexLogin, setUser, logout }}>
       <Routes>
         {!setupComplete && (
           <Route path="*" element={<Setup onDone={() => setSetupComplete(true)} />} />

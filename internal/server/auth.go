@@ -19,7 +19,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	resp := map[string]any{"setupComplete": count > 0, "version": Version}
+	resp := map[string]any{"setupComplete": count > 0, "version": Version, "plexLogin": s.plexEnabled()}
 	if u := s.currentUser(r); u != nil {
 		resp["user"] = u
 	}

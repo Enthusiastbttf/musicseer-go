@@ -81,9 +81,37 @@ func migrate(db *sql.DB) error {
 	}
 	// Created here (not in schema.sql) so it always runs after the album
 	// columns exist, on both fresh and upgraded databases.
-	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_unique_open2
-		ON requests(user_id, artist_name, IFNULL(album_mbid,'')) WHERE status IN ('pending','approved','sent')`)
-	return err
+	if _, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_unique_open2
+		ON requests(user_id, artist_name, IFNULL(album_mbid,'')) WHERE status IN ('pending','approved','sent')`); err != nil {
+		return err
+	}
+
+	// v2.5.0: Plex account linkage.
+	var hasPlex bool
+	rows, err = db.Query("PRAGMA table_info(users)")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "plex_id" {
+			hasPlex = true
+		}
+	}
+	rows.Close()
+	if !hasPlex {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN plex_id TEXT"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
@@ -169,6 +197,17 @@ func (s *Store) UpdateUser(id int64, role *string, autoApprove *bool, hash *stri
 	}
 	args = append(args, id)
 	_, err := s.DB.Exec("UPDATE users SET "+strings.Join(sets, ", ")+" WHERE id=?", args...)
+	return err
+}
+
+// UserByPlexID finds the local account linked to a plex.tv account id.
+func (s *Store) UserByPlexID(plexID string) (*User, error) {
+	return scanUser(s.DB.QueryRow("SELECT "+userCols+" FROM users WHERE plex_id=?", plexID))
+}
+
+// LinkPlex attaches a plex.tv account id to a local user.
+func (s *Store) LinkPlex(userID int64, plexID string) error {
+	_, err := s.DB.Exec("UPDATE users SET plex_id=?, updated_at=? WHERE id=?", plexID, now(), userID)
 	return err
 }
 

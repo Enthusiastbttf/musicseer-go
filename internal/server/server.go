@@ -58,6 +58,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/artist", s.requireUser(s.handleArtistDetail))
 	mux.HandleFunc("GET /api/discovery/genres", s.requireUser(s.handleGenres))
 	mux.HandleFunc("GET /api/discovery/genre", s.requireUser(s.handleGenreArtists))
+	mux.HandleFunc("GET /api/preview", s.requireUser(s.handlePreview))
+
+	// Plex sign-in
+	mux.HandleFunc("POST /api/auth/plex/start", s.handlePlexStart)
+	mux.HandleFunc("POST /api/auth/plex/poll", s.handlePlexPoll)
+	mux.HandleFunc("GET /api/admin/plex", s.requireAdmin(s.handlePlexConfigGet))
+	mux.HandleFunc("POST /api/admin/plex", s.requireAdmin(s.handlePlexConfigSet))
 
 	// Requests
 	mux.HandleFunc("GET /api/requests", s.requireUser(s.handleRequestsList))

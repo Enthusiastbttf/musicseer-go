@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"musicseer/internal/clients"
 	"musicseer/internal/store"
 )
 
@@ -109,6 +110,26 @@ func (s *Server) handleRecommendations(w http.ResponseWriter, r *http.Request, u
 
 func (s *Server) handleHiddenGems(w http.ResponseWriter, r *http.Request, u *store.User) {
 	s.serveRecs(w, r, u, "gems")
+}
+
+// handlePreview returns 30-second sample tracks for an artist (Deezer,
+// keyless, cached 12h in memory). Interactive-on-demand like search.
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, _ *store.User) {
+	artist := strings.TrimSpace(r.URL.Query().Get("artist"))
+	if artist == "" {
+		jsonError(w, http.StatusBadRequest, "artist required")
+		return
+	}
+	tracks, err := s.eng.Previews(r.Context(), artist)
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, "preview lookup failed: "+err.Error())
+		return
+	}
+	if tracks == nil {
+		tracks = []clients.DeezerTrack{}
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	jsonWrite(w, http.StatusOK, map[string]any{"tracks": tracks})
 }
 
 // handleSearch is the one endpoint allowed to call out (a single Last.fm or

@@ -3,7 +3,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api, Instance, User } from '../api'
 import { useAuth } from '../App'
 
-type Tab = 'instances' | 'users' | 'status'
+type Tab = 'instances' | 'users' | 'plex' | 'status'
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('instances')
@@ -11,7 +11,7 @@ export default function Admin() {
     <div className="space-y-6 max-w-5xl">
       <h1 className="text-2xl font-bold">Admin</h1>
       <div className="flex gap-2">
-        {(['instances', 'users', 'status'] as Tab[]).map((t) => (
+        {(['instances', 'users', 'plex', 'status'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -23,6 +23,7 @@ export default function Admin() {
       </div>
       {tab === 'instances' && <Instances />}
       {tab === 'users' && <Users />}
+      {tab === 'plex' && <PlexConfig />}
       {tab === 'status' && <Status />}
     </div>
   )
@@ -340,6 +341,113 @@ function Users() {
             )}
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------- plex ----------------
+
+interface PlexServerOption {
+  name: string
+  machineIdentifier: string
+  owned: boolean
+}
+
+function PlexConfig() {
+  const [config, setConfig] = useState<{ enabled: boolean; machineId: string; serverName: string } | null>(null)
+  const [servers, setServers] = useState<PlexServerOption[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  const load = useCallback(() => api.get<{ enabled: boolean; machineId: string; serverName: string }>('/api/admin/plex').then(setConfig), [])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const connect = async () => {
+    setBusy(true)
+    setMessage('A Plex window opened — approve the link there…')
+    setServers(null)
+    try {
+      const start = await api.post<{ pinId: number; authUrl: string }>('/api/auth/plex/start')
+      window.open(start.authUrl, '_blank', 'noopener,width=600,height=700')
+      const poll = async (): Promise<void> => {
+        const res = await api.post<{ pending?: boolean; servers?: PlexServerOption[] }>(
+          '/api/auth/plex/poll?setup=1',
+          { pinId: start.pinId },
+        )
+        if (res.servers) {
+          setServers(res.servers)
+          setMessage(res.servers.length ? 'Pick the server whose members may sign in:' : 'No Plex servers found on that account.')
+          setBusy(false)
+          return
+        }
+        window.setTimeout(poll, 2000)
+      }
+      poll()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'failed')
+      setBusy(false)
+    }
+  }
+
+  const choose = async (srv: PlexServerOption) => {
+    await api.post('/api/admin/plex', { enabled: true, machineId: srv.machineIdentifier, serverName: srv.name })
+    setServers(null)
+    setMessage(`Enabled — anyone with access to “${srv.name}” can now sign in with Plex.`)
+    load()
+  }
+
+  const toggle = async () => {
+    if (!config) return
+    await api.post('/api/admin/plex', { enabled: !config.enabled, machineId: config.machineId, serverName: config.serverName })
+    load()
+  }
+
+  if (!config) return <p className="text-sm text-slate-500">Loading…</p>
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div className="card p-6 space-y-3">
+        <h3 className="font-bold">Sign in with Plex</h3>
+        <p className="text-sm text-slate-400">
+          Lets family members log in with the Plex accounts they already use. Only accounts with access
+          to your chosen Plex server are allowed; new users are created automatically with no admin rights
+          and no auto-approve.
+        </p>
+        {config.machineId ? (
+          <div className="text-sm">
+            <span className="text-slate-400">Server:</span> <b>{config.serverName || config.machineId}</b>
+            <span className={`ml-3 text-xs font-semibold rounded-md px-2 py-0.5 ${config.enabled ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+              {config.enabled ? 'enabled' : 'disabled'}
+            </span>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">Not configured yet.</p>
+        )}
+        <div className="flex gap-2">
+          <button className="btn-primary" onClick={connect} disabled={busy}>
+            {config.machineId ? 'Reconnect / change server' : 'Connect Plex'}
+          </button>
+          {config.machineId && (
+            <button className="btn-ghost" onClick={toggle}>
+              {config.enabled ? 'Disable Plex sign-in' : 'Enable Plex sign-in'}
+            </button>
+          )}
+        </div>
+        {message && <p className="text-sm text-slate-400">{message}</p>}
+        {servers && servers.length > 0 && (
+          <div className="divide-y divide-white/5 border border-white/10 rounded-xl">
+            {servers.map((srv) => (
+              <button key={srv.machineIdentifier} onClick={() => choose(srv)} className="w-full text-left px-4 py-3 hover:bg-white/5 text-sm">
+                <b>{srv.name}</b>
+                {srv.owned && <span className="text-xs text-accent ml-2">owned</span>}
+                <span className="block text-xs text-slate-500">{srv.machineIdentifier}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

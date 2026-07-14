@@ -1,7 +1,8 @@
-import { ArrowLeft, Check, Clock, Disc3, Music2, Plus } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Disc3, Music2, Pause, Play, Plus, Youtube } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
+import { PreviewTrack, playUrl, subscribe } from '../audio'
 
 interface AlbumEntry {
   mbid: string
@@ -79,6 +80,7 @@ export default function Artist() {
 
   const bio = detail.bio ?? ''
   const shortBio = bio.length > 420 ? bio.slice(0, 420).trimEnd() + '…' : bio
+  const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(detail.name)}`
 
   return (
     <div className="max-w-6xl space-y-8">
@@ -101,7 +103,10 @@ export default function Artist() {
             {detail.genres && detail.genres.length > 0 && <span>· {detail.genres.slice(0, 4).join(' · ')}</span>}
             {detail.listeners > 0 && <span>· {formatListeners(detail.listeners)}</span>}
           </div>
-          <div className="mt-3">
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <a href={youtubeUrl} target="_blank" rel="noreferrer" className="btn-ghost" title="Search on YouTube">
+              <Youtube size={15} className="text-red-500" /> YouTube
+            </a>
             {detail.inLibrary ? (
               <span className="btn bg-emerald-500/10 text-emerald-400 cursor-default">
                 <Check size={15} /> In your library
@@ -127,6 +132,8 @@ export default function Artist() {
         </div>
       </header>
 
+      <TopTracks artist={detail.name} />
+
       {sections.map(
         ([title, entries]) =>
           entries.length > 0 && (
@@ -148,6 +155,47 @@ export default function Artist() {
         <div className="card p-8 text-sm text-slate-500">MusicBrainz lists no releases for this artist.</div>
       )}
     </div>
+  )
+}
+
+function TopTracks({ artist }: { artist: string }) {
+  const [tracks, setTracks] = useState<PreviewTrack[]>([])
+  const [playingKey, setPlayingKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.get<{ tracks: PreviewTrack[] }>(`/api/preview?artist=${encodeURIComponent(artist)}`)
+      .then((r) => setTracks(r.tracks)).catch(() => {})
+  }, [artist])
+  useEffect(() => subscribe(setPlayingKey), [])
+
+  if (tracks.length === 0) return null
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Play size={18} className="text-accent" />
+        <h2 className="text-lg font-bold">Top tracks</h2>
+        <span className="text-xs text-slate-600">30-second samples</span>
+      </div>
+      <div className="card divide-y divide-white/5 max-w-2xl">
+        {tracks.map((t, i) => {
+          const key = `${artist}::${i}`
+          const active = playingKey === key
+          return (
+            <button
+              key={key}
+              onClick={() => playUrl(key, t.preview)}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-white/5 transition-colors"
+            >
+              <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-white' : 'bg-white/10 text-slate-300'}`}>
+                {active ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+              </span>
+              <span className="text-sm truncate">{t.title}</span>
+              {active && <span className="ml-auto text-[10px] text-accent uppercase tracking-widest shrink-0">playing</span>}
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
