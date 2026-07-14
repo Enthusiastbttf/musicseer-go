@@ -72,8 +72,8 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
           {artist.name}
         </div>
       )}
-      <div className="text-xs text-slate-500 truncate h-4">
-        {artist.genres?.slice(0, 3).join(' · ') || formatListeners(artist.listeners) || artist.reason || ''}
+      <div className="text-xs text-slate-500 truncate h-4" title={artist.disambiguation}>
+        {artist.disambiguation || artist.genres?.slice(0, 3).join(' · ') || formatListeners(artist.listeners) || artist.reason || ''}
       </div>
       <div className="mt-3">
         {artist.inLibrary ? (

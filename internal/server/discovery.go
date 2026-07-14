@@ -121,7 +121,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 		return
 	}
 
-	type hit struct{ name, mbid string }
+	type hit struct{ name, mbid, disamb string }
 	var results []hit
 	if s.eng.UsingLastFM() {
 		found, err := s.eng.LastFM.SearchArtists(r.Context(), q, 24)
@@ -130,7 +130,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 			return
 		}
 		for _, a := range found {
-			results = append(results, hit{a.Name, a.MBID})
+			results = append(results, hit{a.Name, a.MBID, ""})
 		}
 	} else {
 		found, err := s.eng.MB.SearchArtists(r.Context(), q, 24)
@@ -139,7 +139,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 			return
 		}
 		for _, a := range found {
-			results = append(results, hit{a.Name, a.MBID})
+			// "US · Group · Christian rock" — everything MusicBrainz knows
+			// that tells identically-named artists apart.
+			var parts []string
+			if a.Country != "" {
+				parts = append(parts, a.Country)
+			}
+			if a.Type != "" {
+				parts = append(parts, a.Type)
+			}
+			if a.Disambiguation != "" {
+				parts = append(parts, a.Disambiguation)
+			}
+			results = append(results, hit{a.Name, a.MBID, strings.Join(parts, " · ")})
 		}
 	}
 
@@ -152,22 +164,28 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 	meta, _ := s.st.ArtistsByNames(names)
 
 	type entry struct {
-		Name      string `json:"name"`
-		MBID      string `json:"mbid,omitempty"`
-		Listeners int64  `json:"listeners"`
-		ImageURL  string `json:"imageUrl,omitempty"`
-		InLibrary bool   `json:"inLibrary"`
-		Requested bool   `json:"requested"`
+		Name           string `json:"name"`
+		MBID           string `json:"mbid,omitempty"`
+		Disambiguation string `json:"disambiguation,omitempty"`
+		Listeners      int64  `json:"listeners"`
+		ImageURL       string `json:"imageUrl,omitempty"`
+		InLibrary      bool   `json:"inLibrary"`
+		Requested      bool   `json:"requested"`
 	}
 	out := make([]entry, 0, len(results))
 	for _, a := range results {
 		key := strings.ToLower(a.name)
-		e := entry{Name: a.name, MBID: a.mbid, InLibrary: libNames[key], Requested: reqNames[key]}
+		e := entry{Name: a.name, MBID: a.mbid, Disambiguation: a.disamb, InLibrary: libNames[key], Requested: reqNames[key]}
 		if m := meta[key]; m != nil {
 			e.ImageURL, e.Listeners = m.ImageURL, m.Listeners
 			if e.MBID == "" {
 				e.MBID = m.MBID
 			}
+		}
+		if e.ImageURL == "" {
+			// Backfill artwork in the background so results have images on
+			// the next visit (and often within seconds on this one).
+			s.eng.EnqueueImage(a.name, a.mbid)
 		}
 		out = append(out, e)
 	}

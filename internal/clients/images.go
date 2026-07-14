@@ -131,6 +131,8 @@ type MBSearchResult struct {
 	Name           string
 	MBID           string
 	Disambiguation string
+	Country        string
+	Type           string // Person | Group | ...
 	Score          int
 }
 
@@ -143,6 +145,8 @@ func (m *MusicBrainz) SearchArtists(ctx context.Context, query string, limit int
 			Name           string `json:"name"`
 			Score          int    `json:"score"`
 			Disambiguation string `json:"disambiguation"`
+			Country        string `json:"country"`
+			Type           string `json:"type"`
 		} `json:"artists"`
 	}
 	base := mbBase()
@@ -154,7 +158,8 @@ func (m *MusicBrainz) SearchArtists(ctx context.Context, query string, limit int
 	}
 	out := make([]MBSearchResult, 0, len(resp.Artists))
 	for _, a := range resp.Artists {
-		out = append(out, MBSearchResult{Name: a.Name, MBID: a.ID, Score: a.Score, Disambiguation: a.Disambiguation})
+		out = append(out, MBSearchResult{Name: a.Name, MBID: a.ID, Score: a.Score,
+			Disambiguation: a.Disambiguation, Country: a.Country, Type: a.Type})
 	}
 	return out, nil
 }

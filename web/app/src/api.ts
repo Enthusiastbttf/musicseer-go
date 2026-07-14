@@ -42,6 +42,7 @@ export interface ArtistItem {
   rank?: number
   name: string
   mbid?: string
+  disambiguation?: string
   imageUrl?: string
   genres?: string[]
   listeners?: number

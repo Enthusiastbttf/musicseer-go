@@ -514,6 +514,9 @@ func (e *Engine) RefreshUserAsync(userID int64) {
 
 // ---------- images ----------
 
+// EnqueueImage queues a background image lookup (deduped, rate-limited).
+func (e *Engine) EnqueueImage(name, mbid string) { e.enqueueImage(name, mbid) }
+
 func (e *Engine) enqueueImage(name, mbid string) {
 	select {
 	case e.imageQueue <- imageJob{name: name, mbid: mbid}:
