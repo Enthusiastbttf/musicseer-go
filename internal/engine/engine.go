@@ -29,6 +29,7 @@ type Engine struct {
 	box     *secrets.Box
 	log     *slog.Logger
 	LastFM  *clients.LastFM
+	LB      *clients.ListenBrainz
 	Deezer  *clients.Deezer
 	AudioDB *clients.AudioDB
 	MB      *clients.MusicBrainz
@@ -48,6 +49,7 @@ func New(cfg config.Config, st *store.Store, box *secrets.Box, log *slog.Logger)
 	return &Engine{
 		cfg: cfg, st: st, box: box, log: log,
 		LastFM:     clients.NewLastFM(cfg.LastFMKey),
+		LB:         clients.NewListenBrainz(),
 		Deezer:     clients.NewDeezer(),
 		AudioDB:    clients.NewAudioDB(),
 		MB:         clients.NewMusicBrainz(cfg.Contact),
@@ -55,6 +57,10 @@ func New(cfg config.Config, st *store.Store, box *secrets.Box, log *slog.Logger)
 		status:     map[string]string{},
 	}
 }
+
+// UsingLastFM reports whether a Last.fm key is configured; without one the
+// engine runs on the keyless ListenBrainz/MusicBrainz backends.
+func (e *Engine) UsingLastFM() bool { return e.cfg.LastFMKey != "" }
 
 func (e *Engine) setStatus(job, outcome string) {
 	e.mu.Lock()
@@ -106,47 +112,70 @@ func (e *Engine) schedule(ctx context.Context, name string, every time.Duration,
 // One API call for the chart; metadata comes back in the same payload, so a
 // full refresh is seconds, not the old app's sequential 100-artist crawl.
 func (e *Engine) SyncTrending(ctx context.Context) error {
-	if e.cfg.LastFMKey == "" {
-		return nil // discovery disabled until a key is configured
+	type chartEntry struct {
+		name, mbid           string
+		listeners, playcount int64
 	}
-	top, err := e.LastFM.TopArtists(ctx, 100)
-	if err != nil {
-		return err
+	var chart []chartEntry
+
+	if e.UsingLastFM() {
+		top, err := e.LastFM.TopArtists(ctx, 100)
+		if err != nil {
+			return err
+		}
+		for _, a := range top {
+			listeners, _ := strconv.ParseInt(a.Listeners, 10, 64)
+			playcount, _ := strconv.ParseInt(a.Playcount, 10, 64)
+			chart = append(chart, chartEntry{a.Name, a.MBID, listeners, playcount})
+		}
+	} else {
+		top, err := e.LB.TopArtists(ctx, "week", 100)
+		if err != nil {
+			return err
+		}
+		for _, a := range top {
+			chart = append(chart, chartEntry{a.Name, a.MBID, 0, a.ListenCount})
+		}
 	}
-	if len(top) == 0 {
+	if len(chart) == 0 {
 		return nil
 	}
-	trending := make([]store.TrendingArtist, 0, len(top))
-	for i, a := range top {
-		trending = append(trending, store.TrendingArtist{Rank: i + 1, Name: a.Name, MBID: a.MBID})
-		listeners, _ := strconv.ParseInt(a.Listeners, 10, 64)
-		playcount, _ := strconv.ParseInt(a.Playcount, 10, 64)
-		e.st.UpsertArtist(&store.Artist{Name: a.Name, MBID: a.MBID, Listeners: listeners, Playcount: playcount})
-		e.enqueueImage(a.Name, a.MBID)
+
+	trending := make([]store.TrendingArtist, 0, len(chart))
+	for i, a := range chart {
+		trending = append(trending, store.TrendingArtist{Rank: i + 1, Name: a.name, MBID: a.mbid})
+		e.st.UpsertArtist(&store.Artist{Name: a.name, MBID: a.mbid, Listeners: a.listeners, Playcount: a.playcount})
+		e.enqueueImage(a.name, a.mbid)
 	}
 	if err := e.st.ReplaceTrending("global", trending); err != nil {
 		return err
 	}
-	e.log.Info("trending synced", "artists", len(trending))
+	e.log.Info("trending synced", "artists", len(trending), "source", map[bool]string{true: "lastfm", false: "listenbrainz"}[e.UsingLastFM()])
 	// Genres enrichment for the top of the chart (rate-limited MusicBrainz).
-	go e.enrichGenres(ctx, top[:min(25, len(top))])
+	pairs := make([]namedMBID, 0, 25)
+	for _, a := range chart[:min(25, len(chart))] {
+		pairs = append(pairs, namedMBID{a.name, a.mbid})
+	}
+	go e.enrichGenres(ctx, pairs)
 	return nil
 }
 
-func (e *Engine) enrichGenres(ctx context.Context, artists []clients.LFArtist) {
+type namedMBID struct{ name, mbid string }
+
+func (e *Engine) enrichGenres(ctx context.Context, artists []namedMBID) {
 	for _, a := range artists {
-		if a.MBID == "" {
+		if a.mbid == "" {
 			continue
 		}
-		known, _ := e.st.ArtistsByNames([]string{a.Name})
-		if k := known[strings.ToLower(a.Name)]; k != nil && len(k.Genres) > 0 {
+		known, _ := e.st.ArtistsByNames([]string{a.name})
+		if k := known[strings.ToLower(a.name)]; k != nil && len(k.Genres) > 0 {
 			continue
 		}
-		tags, err := e.MB.ArtistTags(ctx, a.MBID)
+		tags, err := e.MB.ArtistTags(ctx, a.mbid)
 		if err != nil || len(tags) == 0 {
 			continue
 		}
-		e.st.UpsertArtist(&store.Artist{Name: a.Name, MBID: a.MBID, Genres: tags})
+		e.st.UpsertArtist(&store.Artist{Name: a.name, MBID: a.mbid, Genres: tags})
 	}
 }
 
@@ -255,9 +284,6 @@ const (
 // similar-artists fetch per seed (30-day cached), executed with bounded
 // concurrency. Everything else is batch SQLite.
 func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error {
-	if e.cfg.LastFMKey == "" {
-		return nil
-	}
 	seeds, err := e.st.LibraryTop(20)
 	if err != nil {
 		return err
@@ -397,10 +423,18 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 		return err
 	}
 
-	// Hidden gems: strong similarity, small audience.
+	// Hidden gems: strong similarity, small audience. "Small" = under 500K
+	// Last.fm listeners, or unknown-but-not-charting (keyless mode has no
+	// global listener counts, so absence from the trending chart stands in).
+	trendingNow, _, _ := e.st.Trending("global", 100)
+	charting := make(map[string]bool, len(trendingNow))
+	for _, t := range trendingNow {
+		charting[strings.ToLower(t.Name)] = true
+	}
 	gems := make([]Recommendation, 0, 60)
 	for _, r := range recs {
-		if r.Similarity >= 0.3 && r.Listeners > 0 && r.Listeners < 500_000 {
+		small := (r.Listeners > 0 && r.Listeners < 500_000) || (r.Listeners == 0 && !charting[strings.ToLower(r.Name)])
+		if r.Similarity >= 0.3 && small {
 			gems = append(gems, r)
 		}
 	}
@@ -423,18 +457,39 @@ func (e *Engine) similarFor(ctx context.Context, name, mbid string) []store.Simi
 	if cached, ok := e.st.SimilarCached(name, 30*24*time.Hour); ok {
 		return cached
 	}
-	similar, err := e.LastFM.SimilarArtists(ctx, name, mbid, 50)
-	if err != nil {
-		e.log.Warn("similar fetch failed", "artist", name, "err", err)
+
+	var out []store.SimilarArtist
+	var fetchErr error
+	if e.UsingLastFM() {
+		similar, err := e.LastFM.SimilarArtists(ctx, name, mbid, 50)
+		fetchErr = err
+		for _, s := range similar {
+			match, _ := strconv.ParseFloat(s.Match, 64)
+			out = append(out, store.SimilarArtist{Name: s.Name, MBID: s.MBID, Match: match})
+		}
+	} else {
+		// ListenBrainz Labs works on MBIDs. Lidarr-sourced seeds always have
+		// one; for anything else, resolve via MusicBrainz search.
+		if mbid == "" {
+			mbid, _ = e.MB.SearchArtistMBID(ctx, name)
+		}
+		if mbid == "" {
+			e.st.SaveSimilar(name, []store.SimilarArtist{}) // do not retry every run
+			return nil
+		}
+		similar, err := e.LB.SimilarArtists(ctx, mbid, 50)
+		fetchErr = err
+		for _, s := range similar {
+			out = append(out, store.SimilarArtist{Name: s.Name, MBID: s.MBID, Match: s.Score})
+		}
+	}
+
+	if fetchErr != nil {
+		e.log.Warn("similar fetch failed", "artist", name, "err", fetchErr)
 		if cached, ok := e.st.SimilarCached(name, 365*24*time.Hour); ok {
 			return cached // stale beats empty
 		}
 		return nil
-	}
-	out := make([]store.SimilarArtist, 0, len(similar))
-	for _, s := range similar {
-		match, _ := strconv.ParseFloat(s.Match, 64)
-		out = append(out, store.SimilarArtist{Name: s.Name, MBID: s.MBID, Match: match})
 	}
 	e.st.SaveSimilar(name, out)
 	return out

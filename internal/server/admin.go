@@ -310,12 +310,13 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request, _ *store.Us
 	library, _ := s.st.LibraryCount()
 	reqCounts, _ := s.st.RequestCounts()
 	jsonWrite(w, http.StatusOK, map[string]any{
-		"users":         users,
-		"cachedArtists": artists,
+		"users":          users,
+		"cachedArtists":  artists,
 		"libraryArtists": library,
-		"requests":      reqCounts,
-		"jobs":          s.eng.Status(),
-		"version":       Version,
+		"requests":       reqCounts,
+		"jobs":           s.eng.Status(),
+		"discovery":      map[bool]string{true: "lastfm", false: "listenbrainz"}[s.eng.UsingLastFM()],
+		"version":        Version,
 	})
 }
 

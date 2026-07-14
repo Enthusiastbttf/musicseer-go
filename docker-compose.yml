@@ -8,7 +8,7 @@ services:
     ports:
       - "8688:8688"
     environment:
-      LASTFM_API_KEY: ${LASTFM_API_KEY:?set LASTFM_API_KEY in .env}
+      LASTFM_API_KEY: ${LASTFM_API_KEY:-}   # optional — keyless ListenBrainz used when empty
       MUSICBRAINZ_CONTACT: ${MUSICBRAINZ_CONTACT:-admin@example.com}
       # MUSICSEER_TRENDING_INTERVAL: 6h
       # MUSICSEER_LIBRARY_INTERVAL: 12h

@@ -2,11 +2,11 @@
 
 > Music discovery and request management for **Navidrome** + **Lidarr** — rebuilt from the ground up as a single fast binary.
 
-MusicSeer 2 is an Overseerr-style request front end for music, built for people running the classic *arr pipeline (Lidarr + Prowlarr + a torrent client). It is **one ~9 MB Go binary with the web UI and database built in**, idles at ~30 MB of RAM, and serves every page from a local SQLite cache in single-digit milliseconds. It began as a ground-up rewrite of [tkharbeche/musicseer](https://github.com/tkharbeche/musicseer) (see docs/COMPARISON.md) and works with or without a Navidrome server.
+MusicSeer 2 is an Overseerr-style request front end for music, built for people running the classic *arr pipeline (Lidarr + Prowlarr + a torrent client). It needs **no API keys at all** out of the box — discovery runs on the open ListenBrainz + MusicBrainz APIs, and upgrades itself to Last.fm's richer similarity data if you provide a key. It is **one ~9 MB Go binary with the web UI and database built in**, idles at ~30 MB of RAM, and serves every page from a local SQLite cache in single-digit milliseconds. It began as a ground-up rewrite of [tkharbeche/musicseer](https://github.com/tkharbeche/musicseer) (see docs/COMPARISON.md) and works with or without a Navidrome server.
 
 ## Features
 
-- 🔥 **Trending Now** — global Last.fm charts, refreshed in the background
+- 🔥 **Trending Now** — global charts (Last.fm or ListenBrainz), refreshed in the background
 - 🎯 **Similar to Your Library** — personalized recommendations scored on popularity, similarity, genre diversity and freshness
 - 💎 **Hidden Gems** — artists your library says you'll love, under 500K listeners
 - 🔎 **Search** — find any artist and request them in one click
@@ -22,7 +22,7 @@ Interactive requests **never** call an external API (the only exception: the sea
 ## Quick start (Docker)
 
 ```bash
-cp .env.example .env    # add your Last.fm API key
+cp .env.example .env    # optionally add a Last.fm API key
 docker compose up -d
 # open http://localhost:8688 and create your admin account
 ```
@@ -51,7 +51,7 @@ The script creates an unprivileged Debian 13 container with pinned DNS, installs
 1. Open the web UI → create the **admin account** (setup closes itself afterwards — there is no open registration endpoint).
 2. **Admin → Instances** → add Lidarr (base URL + API key), then pick the **quality profile, metadata profile and root folder** from the dropdowns. Lidarr also serves as the library source for recommendations.
 3. *(Optional)* **Admin → Instances** → add Navidrome (base URL + username/password; tick *login source* if family members should log in with Navidrome credentials).
-4. Add your **Last.fm API key** to the environment ([get one free](https://www.last.fm/api/account/create)) and restart.
+4. *(Optional)* Add a **Last.fm API key** to the environment ([free](https://www.last.fm/api/account/create)) for Last.fm-based discovery; without one, the keyless ListenBrainz/MusicBrainz backend is used automatically.
 5. **Admin → Status** → *Sync library* once; recommendations build automatically after every sync.
 
 ## Migrating from the original MusicSeer
@@ -72,7 +72,7 @@ Everything is environment variables (a `.env` file in the working directory is a
 |---|---|---|
 | `MUSICSEER_PORT` | `8688` | HTTP port |
 | `MUSICSEER_DATA_DIR` | `./data` | SQLite DB + encryption key |
-| `LASTFM_API_KEY` | — | required for discovery |
+| `LASTFM_API_KEY` | — | optional: switches discovery from ListenBrainz (keyless) to Last.fm |
 | `MUSICBRAINZ_CONTACT` | `admin@example.com` | contact in MusicBrainz user-agent (their policy) |
 | `MUSICSEER_TRENDING_INTERVAL` | `6h` | trending refresh |
 | `MUSICSEER_LIBRARY_INTERVAL` | `12h` | library sync + recommendation rebuild |

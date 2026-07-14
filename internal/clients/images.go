@@ -3,6 +3,8 @@ package clients
 import (
 	"context"
 	"net/url"
+	"os"
+	"strconv"
 )
 
 // Deezer: free, no key, best artist images. Public limit is 50 req / 5 s;
@@ -68,6 +70,16 @@ func NewMusicBrainz(contact string) *MusicBrainz {
 	return &MusicBrainz{lim: newLimiter(0.9), userAgent: "MusicSeer/2.0 (" + contact + ")"}
 }
 
+// mbBase allows tests to point at a mock server; defaults to production.
+func mbBase() string {
+	if b := os.Getenv("MUSICSEER_MB_BASE"); b != "" {
+		return b
+	}
+	return "https://musicbrainz.org"
+}
+
+func fmtInt(n int) string { return strconv.Itoa(n) }
+
 func (m *MusicBrainz) ArtistTags(ctx context.Context, mbid string) ([]string, error) {
 	var resp struct {
 		Tags []struct {
@@ -75,7 +87,7 @@ func (m *MusicBrainz) ArtistTags(ctx context.Context, mbid string) ([]string, er
 			Count int    `json:"count"`
 		} `json:"tags"`
 	}
-	err := getJSON(ctx, m.lim, "https://musicbrainz.org/ws/2/artist/"+url.PathEscape(mbid)+"?inc=tags&fmt=json",
+	err := getJSON(ctx, m.lim, mbBase()+"/ws/2/artist/"+url.PathEscape(mbid)+"?inc=tags&fmt=json",
 		map[string]string{"User-Agent": m.userAgent}, &resp)
 	if err != nil {
 		return nil, err
@@ -92,6 +104,39 @@ func (m *MusicBrainz) ArtistTags(ctx context.Context, mbid string) ([]string, er
 	return tags, nil
 }
 
+// MBSearchResult is one hit from MusicBrainz artist search.
+type MBSearchResult struct {
+	Name           string
+	MBID           string
+	Disambiguation string
+	Score          int
+}
+
+// SearchArtists is the keyless search backend (used when no Last.fm key is
+// configured). One rate-limited call per user search.
+func (m *MusicBrainz) SearchArtists(ctx context.Context, query string, limit int) ([]MBSearchResult, error) {
+	var resp struct {
+		Artists []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Score          int    `json:"score"`
+			Disambiguation string `json:"disambiguation"`
+		} `json:"artists"`
+	}
+	base := mbBase()
+	err := getJSON(ctx, m.lim,
+		base+"/ws/2/artist?limit="+url.QueryEscape(fmtInt(limit))+"&fmt=json&query="+url.QueryEscape(query),
+		map[string]string{"User-Agent": m.userAgent}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MBSearchResult, 0, len(resp.Artists))
+	for _, a := range resp.Artists {
+		out = append(out, MBSearchResult{Name: a.Name, MBID: a.ID, Score: a.Score, Disambiguation: a.Disambiguation})
+	}
+	return out, nil
+}
+
 // SearchArtistMBID finds the best-match MBID for an artist name.
 func (m *MusicBrainz) SearchArtistMBID(ctx context.Context, name string) (string, error) {
 	var resp struct {
@@ -101,7 +146,7 @@ func (m *MusicBrainz) SearchArtistMBID(ctx context.Context, name string) (string
 		} `json:"artists"`
 	}
 	err := getJSON(ctx, m.lim,
-		"https://musicbrainz.org/ws/2/artist?limit=1&fmt=json&query=artist:"+url.QueryEscape(`"`+name+`"`),
+		mbBase()+"/ws/2/artist?limit=1&fmt=json&query=artist:"+url.QueryEscape(`"`+name+`"`),
 		map[string]string{"User-Agent": m.userAgent}, &resp)
 	if err != nil || len(resp.Artists) == 0 || resp.Artists[0].Score < 90 {
 		return "", err

@@ -66,11 +66,11 @@ func (s Subsonic) Ping(ctx context.Context, baseURL, username, password string) 
 }
 
 type SubsonicArtist struct {
-	Name        string `json:"name"`
-	MBID        string `json:"musicBrainzId"`
-	AlbumCount  int    `json:"albumCount"`
-	Starred     string `json:"starred"`
-	UserRating  int    `json:"userRating"`
+	Name       string `json:"name"`
+	MBID       string `json:"musicBrainzId"`
+	AlbumCount int    `json:"albumCount"`
+	Starred    string `json:"starred"`
+	UserRating int    `json:"userRating"`
 }
 
 // GetArtists returns the full artist index flattened.

@@ -106,7 +106,7 @@ func main() {
 	}()
 
 	if cfg.LastFMKey == "" {
-		log.Warn("LASTFM_API_KEY is not set — discovery features are disabled until you configure it")
+		log.Info("no LASTFM_API_KEY set — using the keyless ListenBrainz/MusicBrainz discovery backend (set a key to switch to Last.fm)")
 	}
 	log.Info("musicseer started", "port", cfg.Port, "data", cfg.DataDir, "version", server.Version)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

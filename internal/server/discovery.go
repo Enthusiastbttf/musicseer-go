@@ -85,25 +85,43 @@ func (s *Server) handleHiddenGems(w http.ResponseWriter, r *http.Request, u *sto
 	s.serveRecs(w, r, u, "gems")
 }
 
-// handleSearch is the one endpoint allowed to call out (a single Last.fm
-// search, ~100ms) because it is inherently interactive. Results are annotated
-// with library/request state from SQLite.
+// handleSearch is the one endpoint allowed to call out (a single Last.fm or
+// MusicBrainz search) because it is inherently interactive. Results are
+// annotated with library/request state from SQLite.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.User) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		jsonWrite(w, http.StatusOK, []any{})
 		return
 	}
-	results, err := s.eng.LastFM.SearchArtists(r.Context(), q, 24)
-	if err != nil {
-		jsonError(w, http.StatusBadGateway, "search failed: "+err.Error())
-		return
+
+	type hit struct{ name, mbid string }
+	var results []hit
+	if s.eng.UsingLastFM() {
+		found, err := s.eng.LastFM.SearchArtists(r.Context(), q, 24)
+		if err != nil {
+			jsonError(w, http.StatusBadGateway, "search failed: "+err.Error())
+			return
+		}
+		for _, a := range found {
+			results = append(results, hit{a.Name, a.MBID})
+		}
+	} else {
+		found, err := s.eng.MB.SearchArtists(r.Context(), q, 24)
+		if err != nil {
+			jsonError(w, http.StatusBadGateway, "search failed: "+err.Error())
+			return
+		}
+		for _, a := range found {
+			results = append(results, hit{a.Name, a.MBID})
+		}
 	}
+
 	libNames, _ := s.st.LibraryNames()
 	reqNames, _ := s.st.RequestedNames()
 	names := make([]string, len(results))
 	for i, a := range results {
-		names[i] = a.Name
+		names[i] = a.name
 	}
 	meta, _ := s.st.ArtistsByNames(names)
 
@@ -117,8 +135,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 	}
 	out := make([]entry, 0, len(results))
 	for _, a := range results {
-		key := strings.ToLower(a.Name)
-		e := entry{Name: a.Name, MBID: a.MBID, InLibrary: libNames[key], Requested: reqNames[key]}
+		key := strings.ToLower(a.name)
+		e := entry{Name: a.name, MBID: a.mbid, InLibrary: libNames[key], Requested: reqNames[key]}
 		if m := meta[key]; m != nil {
 			e.ImageURL, e.Listeners = m.ImageURL, m.Listeners
 			if e.MBID == "" {
