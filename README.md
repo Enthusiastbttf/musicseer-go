@@ -6,18 +6,23 @@ MusicSeer Enhanced is an Overseerr-style request front end for music, built for 
 
 ## Features
 
-- 🔥 **Trending Now** — global charts (Last.fm or ListenBrainz), refreshed in the background
+- 🔥 **Trending Now** — Deezer's mainstream streaming chart (or Last.fm with a key), refreshed in the background with instant artwork
 - 🎯 **Similar to Your Library** — personalized recommendations scored on popularity, similarity, genre diversity and freshness
-- 💎 **Hidden Gems** — artists your library says you'll love, under 500K listeners
-- 🔎 **Search** — find any artist and request them in one click
-- 📝 **Request workflow** — pending → approved → sent to Lidarr (auto-approve per user), with retry on failure
-- 🔐 **Flexible library + login** — Lidarr's artist list doubles as the library source for recommendations (no Navidrome required); add Navidrome for richer signals (stars/ratings) and Navidrome-credential logins
-- ⚙️ **Admin panel** — users, instances (with connection tests and Lidarr profile dropdowns), job status, manual syncs
+- 💎 **Hidden Gems** — artists your library says you'll love, outside the mainstream
+- 🔎 **Search** — MusicBrainz-backed with country/type/disambiguation lines so identically-named artists are tellable apart
+- 👤 **Artist pages** — bio, full discography (albums/EPs/singles) with Cover Art Archive artwork, live Lidarr ownership badges (incl. partial %), per-album requests
+- ☑️ **Album picker** — request several albums at once from a dialog; fulfilled as one batched Lidarr conversation
+- ▶️ **Audio previews** — 30-second samples on every card and album (Deezer, keyless) + YouTube link-outs
+- 🏷️ **Genre exploration** — personal "genres to explore" pills from your library's tags + curated browse tiles, all requestable
+- 📝 **Request workflow** — artist- and album-level; pending → approved → sent to Lidarr (auto-approve per user), retry on failure
+- 🔐 **Three login paths** — local passwords, Navidrome credentials, or **Sign in with Plex** (plex.tv PIN flow, access-gated to your server)
+- 🧬 **Identity-aware matching** — library/requested badges match by MusicBrainz ID, so namesakes never inherit each other's status
+- ⚙️ **Admin panel** — users, instances (connection tests, Lidarr profile dropdowns), Plex sign-in config, job status, manual syncs
 - 📦 **Zero-dependency deploy** — one binary, one data directory; Docker image and Proxmox LXC installer included
 
 ## Architecture in one paragraph
 
-Interactive requests **never** call an external API (the only exception: the search box makes one Last.fm query). Background jobs sync the Last.fm charts, your Navidrome library and per-user recommendations into SQLite on schedules; artist images are resolved by a rate-limited worker (Deezer → TheAudioDB fallback). Page loads are pure local reads. See [docs/COMPARISON.md](docs/COMPARISON.md) for why this matters and receipts from the old codebase.
+Interactive pages never *wait* on third parties: background jobs sync the trending chart, your library and per-user recommendations into SQLite on schedules; artist images resolve via a rate-limited worker (Deezer → TheAudioDB fallback); discography/genre/bio pages are fetched on first view then cached for a week. The only always-live external calls are search, previews and first-visit artist pages — inherently on-demand — and every external GET retries transient failures with backoff. Data sources (all keyless): Deezer (charts, previews, images), MusicBrainz (search, discographies, genres, identity), ListenBrainz (similar artists), TheAudioDB (bios), Cover Art Archive (album art). A Last.fm key upgrades charts/similarity/search to Last.fm data. See [docs/COMPARISON.md](docs/COMPARISON.md) for the architecture rationale.
 
 ## Quick start (Docker)
 
