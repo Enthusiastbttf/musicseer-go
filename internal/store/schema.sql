@@ -120,6 +120,13 @@ CREATE TABLE IF NOT EXISTS genre_cache (
     cached_at TEXT NOT NULL
 );
 
+-- Cached album track lists (30-day TTL).
+CREATE TABLE IF NOT EXISTS album_tracks (
+    mbid      TEXT PRIMARY KEY,
+    data      TEXT NOT NULL,
+    cached_at TEXT NOT NULL
+);
+
 -- Cached artist detail pages: bio + discography (7-day TTL).
 CREATE TABLE IF NOT EXISTS artist_detail (
     mbid      TEXT PRIMARY KEY,

@@ -40,6 +40,7 @@ export default function Artist() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
   const [batchMsg, setBatchMsg] = useState('')
+  const [trackAlbum, setTrackAlbum] = useState<AlbumEntry | null>(null)
 
   const toggleSelect = (mbid: string) => {
     setSelected((prev) => {
@@ -207,7 +208,7 @@ export default function Artist() {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                 {entries.map((album) => (
-                  <AlbumCard key={album.mbid} album={album} artist={detail} />
+                  <AlbumCard key={album.mbid} album={album} artist={detail} onShowTracks={() => setTrackAlbum(album)} />
                 ))}
               </div>
             </section>
@@ -216,6 +217,8 @@ export default function Artist() {
       {detail.albums.length === 0 && (
         <div className="card p-8 text-sm text-slate-500">MusicBrainz lists no releases for this artist.</div>
       )}
+
+      {trackAlbum && <TrackListModal album={trackAlbum} artist={detail} onClose={() => setTrackAlbum(null)} />}
 
       {selecting && (
         <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
@@ -326,7 +329,7 @@ function TopTracks({ artist }: { artist: string }) {
   )
 }
 
-function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail }) {
+function AlbumCard({ album, artist, onShowTracks }: { album: AlbumEntry; artist: ArtistDetail; onShowTracks: () => void }) {
   const [imgOk, setImgOk] = useState(true)
   const [playing, setPlaying] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -335,7 +338,8 @@ function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail 
 
   useEffect(() => subscribe((key) => setPlaying(key === previewKey)), [previewKey])
 
-  const togglePreview = async () => {
+  const togglePreview = async (e: React.MouseEvent) => {
+    e.stopPropagation()
     setPreviewBusy(true)
     try {
       const found = await playAlbum(artist.name, album.title)
@@ -348,13 +352,17 @@ function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail 
 
   return (
     <div className="card p-3 flex flex-col group">
-      <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
+      <div
+        className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3 cursor-pointer"
+        onClick={onShowTracks}
+        title="Show track list"
+      >
         {album.coverUrl && imgOk ? (
           <img
             src={album.coverUrl}
             alt={album.title}
             loading="lazy"
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             onError={() => setImgOk(false)}
           />
         ) : (
@@ -389,9 +397,13 @@ function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail 
           </span>
         )}
       </div>
-      <div className="text-sm font-semibold leading-tight line-clamp-2" title={album.title}>
+      <button
+        onClick={onShowTracks}
+        className="text-left text-sm font-semibold leading-tight line-clamp-2 hover:text-accent"
+        title="Show track list"
+      >
         {album.title}
-      </div>
+      </button>
       <div className="text-xs text-slate-500 mb-2">{album.year || '—'}</div>
       <div className="mt-auto">
         {album.owned ? (
@@ -413,6 +425,108 @@ function AlbumCard({ album, artist }: { album: AlbumEntry; artist: ArtistDetail 
             }
           />
         )}
+      </div>
+    </div>
+  )
+}
+
+interface AlbumTrackRow {
+  position: number
+  title: string
+  duration?: number
+  preview?: string
+}
+
+function TrackListModal({ album, artist, onClose }: { album: AlbumEntry; artist: ArtistDetail; onClose: () => void }) {
+  const [tracks, setTracks] = useState<AlbumTrackRow[] | null>(null)
+  const [source, setSource] = useState('')
+  const [error, setError] = useState('')
+  const [playingKey, setPlayingKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    api
+      .get<{ tracks: AlbumTrackRow[]; source: string }>(
+        `/api/album-tracks?artist=${encodeURIComponent(artist.name)}&album=${encodeURIComponent(album.title)}&mbid=${encodeURIComponent(album.mbid)}`,
+      )
+      .then((r) => {
+        setTracks(r.tracks)
+        setSource(r.source)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'failed to load tracks'))
+  }, [album.mbid, album.title, artist.name])
+  useEffect(() => subscribe(setPlayingKey), [])
+
+  const fmt = (secs?: number) =>
+    secs && secs > 0 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : ''
+
+  return (
+    <div className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="card w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl border-accent/20" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-4 px-5 py-4 border-b border-white/5">
+          <span className="w-14 h-14 rounded-lg overflow-hidden bg-white/5 shrink-0">
+            {album.coverUrl && (
+              <img src={album.coverUrl} alt="" className="w-full h-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-bold leading-tight">{album.title}</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {artist.name} · {album.year || '—'} · {album.type}
+              {album.owned && <span className="text-emerald-400 ml-2">in library{album.percent && album.percent < 100 ? ` (${Math.round(album.percent)}%)` : ''}</span>}
+            </p>
+          </div>
+          <button className="btn-ghost !px-2.5" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="overflow-y-auto divide-y divide-white/5 flex-1">
+          {tracks === null && !error && <p className="text-sm text-slate-500 p-5">Loading track list…</p>}
+          {error && <p className="text-sm text-red-400 p-5">{error}</p>}
+          {tracks !== null && tracks.length === 0 && (
+            <p className="text-sm text-slate-500 p-5">No track list found — the album may be missing from both Deezer and MusicBrainz.</p>
+          )}
+          {tracks?.map((t) => {
+            const key = `track:${album.mbid}:${t.position}`
+            const active = playingKey === key
+            return (
+              <div key={key} className="flex items-center gap-3 px-5 py-2">
+                {t.preview ? (
+                  <button
+                    onClick={() => playUrl(key, t.preview!)}
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-white' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}
+                  >
+                    {active ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+                  </button>
+                ) : (
+                  <span className="w-7 text-center text-xs text-slate-600 shrink-0">{t.position}</span>
+                )}
+                <span className="text-sm truncate flex-1">{t.title}</span>
+                <span className="text-xs text-slate-500 shrink-0">{fmt(t.duration)}</span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-2 px-5 py-3 border-t border-white/5">
+          <span className="text-[10px] text-slate-600 uppercase tracking-widest">
+            {source === 'deezer' ? 'Track list & samples via Deezer' : source === 'musicbrainz' ? 'Track list via MusicBrainz — no samples' : ''}
+          </span>
+          <span className="ml-auto" />
+          {!album.owned && !album.requested && (
+            <RequestButton
+              small
+              label="Request album"
+              requested={false}
+              onRequest={() =>
+                api.post('/api/requests', {
+                  artistName: artist.name,
+                  artistMbid: artist.mbid,
+                  albumName: album.title,
+                  albumMbid: album.mbid,
+                })
+              }
+            />
+          )}
+        </div>
       </div>
     </div>
   )

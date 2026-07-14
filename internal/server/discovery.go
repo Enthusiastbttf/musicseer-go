@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"musicseer/internal/clients"
+	"musicseer/internal/engine"
 	"musicseer/internal/store"
 )
 
@@ -130,6 +131,27 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, _ *store.
 	}
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	jsonWrite(w, http.StatusOK, map[string]any{"tracks": tracks})
+}
+
+// handleAlbumTracks returns an album's track list (Deezer with samples,
+// MusicBrainz fallback without). Interactive-on-demand, cached.
+func (s *Server) handleAlbumTracks(w http.ResponseWriter, r *http.Request, _ *store.User) {
+	q := r.URL.Query()
+	artist, album, mbid := strings.TrimSpace(q.Get("artist")), strings.TrimSpace(q.Get("album")), strings.TrimSpace(q.Get("mbid"))
+	if artist == "" || album == "" {
+		jsonError(w, http.StatusBadRequest, "artist and album required")
+		return
+	}
+	tracks, source, err := s.eng.AlbumTrackList(r.Context(), artist, album, mbid)
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, "track list lookup failed: "+err.Error())
+		return
+	}
+	if tracks == nil {
+		tracks = []engine.AlbumTrack{}
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	jsonWrite(w, http.StatusOK, map[string]any{"tracks": tracks, "source": source})
 }
 
 // handleSearch is the one endpoint allowed to call out (a single Last.fm or

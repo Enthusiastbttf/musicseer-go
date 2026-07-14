@@ -841,6 +841,31 @@ func (s *Store) LibraryArtistsMissingGenres(limit int) ([]LibraryArtist, error) 
 	return out, rows.Err()
 }
 
+// ---------- album tracks cache ----------
+
+func (s *Store) AlbumTracksCached(mbid string, maxAge time.Duration) (json.RawMessage, bool) {
+	var data, cachedAt string
+	if err := s.DB.QueryRow("SELECT data, cached_at FROM album_tracks WHERE mbid=?", mbid).Scan(&data, &cachedAt); err != nil {
+		return nil, false
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.000Z", cachedAt)
+	if err != nil || time.Since(t) > maxAge {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
+func (s *Store) SaveAlbumTracks(mbid string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`INSERT INTO album_tracks (mbid, data, cached_at) VALUES (?,?,?)
+		ON CONFLICT(mbid) DO UPDATE SET data=excluded.data, cached_at=excluded.cached_at`,
+		mbid, string(data), now())
+	return err
+}
+
 // ---------- artist detail cache ----------
 
 func (s *Store) ArtistDetailCached(mbid string, maxAge time.Duration) (json.RawMessage, bool) {

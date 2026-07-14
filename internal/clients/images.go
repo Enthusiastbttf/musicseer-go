@@ -63,13 +63,7 @@ func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit 
 		deezerBase()+"/album/"+strconv.FormatInt(search.Data[0].ID, 10)+"/tracks?limit="+fmtInt(limit), nil, &tracks); err != nil {
 		return nil, err
 	}
-	out := make([]DeezerTrack, 0, len(tracks.Data))
-	for _, t := range tracks.Data {
-		if t.Preview != "" {
-			out = append(out, t)
-		}
-	}
-	return out, nil
+	return tracks.Data, nil
 }
 
 // DeezerTrack is one preview-able track.
@@ -293,6 +287,62 @@ func (m *MusicBrainz) ReleaseGroups(ctx context.Context, artistMBID string) ([]M
 			MBID: rg.ID, Title: rg.Title, PrimaryType: rg.PrimaryType,
 			SecondaryTypes: rg.SecondaryTypes, FirstRelease: rg.FirstRelease,
 		})
+	}
+	return out, nil
+}
+
+// MBTrack is one track from a MusicBrainz release.
+type MBTrack struct {
+	Position int    `json:"position"`
+	Title    string `json:"title"`
+	LengthMs int    `json:"lengthMs,omitempty"`
+}
+
+// ReleaseGroupTracks returns the track list of a release group's primary
+// release. Two rate-limited calls; callers cache the result.
+func (m *MusicBrainz) ReleaseGroupTracks(ctx context.Context, rgMBID string) ([]MBTrack, error) {
+	var rg struct {
+		Releases []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"releases"`
+	}
+	if err := getJSON(ctx, m.lim,
+		mbBase()+"/ws/2/release-group/"+url.PathEscape(rgMBID)+"?inc=releases&fmt=json",
+		map[string]string{"User-Agent": m.userAgent}, &rg); err != nil {
+		return nil, err
+	}
+	if len(rg.Releases) == 0 {
+		return nil, nil
+	}
+	releaseID := rg.Releases[0].ID
+	for _, r := range rg.Releases {
+		if r.Status == "Official" {
+			releaseID = r.ID
+			break
+		}
+	}
+	var rel struct {
+		Media []struct {
+			Tracks []struct {
+				Position int    `json:"position"`
+				Title    string `json:"title"`
+				Length   int    `json:"length"`
+			} `json:"tracks"`
+		} `json:"media"`
+	}
+	if err := getJSON(ctx, m.lim,
+		mbBase()+"/ws/2/release/"+url.PathEscape(releaseID)+"?inc=recordings&fmt=json",
+		map[string]string{"User-Agent": m.userAgent}, &rel); err != nil {
+		return nil, err
+	}
+	var out []MBTrack
+	pos := 0
+	for _, med := range rel.Media {
+		for _, t := range med.Tracks {
+			pos++
+			out = append(out, MBTrack{Position: pos, Title: t.Title, LengthMs: t.Length})
+		}
 	}
 	return out, nil
 }
