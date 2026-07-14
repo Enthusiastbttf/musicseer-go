@@ -81,6 +81,8 @@ export default function Artist() {
   const bio = detail.bio ?? ''
   const shortBio = bio.length > 420 ? bio.slice(0, 420).trimEnd() + '…' : bio
   const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(detail.name)}`
+  const ownedCount = detail.albums.filter((a) => a.owned).length
+  const totalReleases = detail.albums.length
 
   return (
     <div className="max-w-6xl space-y-8">
@@ -108,8 +110,18 @@ export default function Artist() {
               <Youtube size={15} className="text-red-500" /> YouTube
             </a>
             {detail.inLibrary ? (
-              <span className="btn bg-emerald-500/10 text-emerald-400 cursor-default">
-                <Check size={15} /> In your library
+              <span
+                className="btn bg-emerald-500/10 text-emerald-400 cursor-default"
+                title={
+                  ownedCount > 0
+                    ? `${ownedCount} of ${totalReleases} releases on this page are in your library`
+                    : 'Artist is in your library, but no releases from this page are downloaded yet'
+                }
+              >
+                <Check size={15} />
+                {ownedCount > 0
+                  ? `In your library · ${ownedCount} of ${totalReleases} releases`
+                  : 'In your library · no releases yet'}
               </span>
             ) : (
               <RequestButton
