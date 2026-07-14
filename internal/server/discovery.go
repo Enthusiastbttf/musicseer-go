@@ -63,7 +63,7 @@ func (s *Server) serveRecs(w http.ResponseWriter, r *http.Request, u *store.User
 	if time.Since(computedAt) > s.cfg.RecsTTL {
 		s.eng.RefreshUserAsync(u.ID) // serve stale now, refresh in background
 	}
-	var items []json.RawMessage
+	var items []map[string]any
 	if err := json.Unmarshal(data, &items); err != nil {
 		jsonError(w, http.StatusInternalServerError, "corrupt recommendation payload")
 		return
@@ -71,6 +71,32 @@ func (s *Server) serveRecs(w http.ResponseWriter, r *http.Request, u *store.User
 	if len(items) > limit {
 		items = items[:limit]
 	}
+
+	// The payload snapshots artwork at compute time, but the image worker
+	// keeps resolving in the background — join the latest images in live so
+	// cards fill in on refresh instead of waiting for the next recompute.
+	var missing []string
+	for _, it := range items {
+		if s, _ := it["imageUrl"].(string); s == "" {
+			if name, _ := it["name"].(string); name != "" {
+				missing = append(missing, name)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		if meta, err := s.st.ArtistsByNames(missing); err == nil {
+			for _, it := range items {
+				if img, _ := it["imageUrl"].(string); img == "" {
+					if name, _ := it["name"].(string); name != "" {
+						if m := meta[strings.ToLower(name)]; m != nil && m.ImageURL != "" {
+							it["imageUrl"] = m.ImageURL
+						}
+					}
+				}
+			}
+		}
+	}
+
 	jsonWrite(w, http.StatusOK, map[string]any{
 		"items":      items,
 		"computedAt": computedAt.UTC().Format(time.RFC3339),
