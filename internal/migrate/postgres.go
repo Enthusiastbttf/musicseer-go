@@ -151,7 +151,7 @@ func FromPostgres(ctx context.Context, dsn string, st *store.Store, box *secrets
 		default:
 			status = "pending"
 		}
-		id, err := st.CreateRequest(uid, artist, mbid, status)
+		id, err := st.CreateRequest(uid, artist, mbid, "", "", status)
 		if err != nil {
 			res.RequestsSkipped++ // open-request UNIQUE index: already imported
 			continue

@@ -8,7 +8,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
   }`
 
 export default function Layout() {
-  const { user, logout } = useAuth()
+  const { user, version, logout } = useAuth()
   return (
     <div className="flex min-h-screen">
       <aside className="w-60 shrink-0 border-r border-white/5 bg-black/40 flex flex-col p-4 sticky top-0 h-screen">
@@ -16,7 +16,10 @@ export default function Layout() {
           <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center shadow-lg shadow-accent/20">
             <Gem size={18} className="text-white" />
           </div>
-          <span className="text-lg font-bold tracking-tight">MusicSeer</span>
+          <div className="flex flex-col leading-none">
+            <span className="text-lg font-bold tracking-tight">MusicSeer</span>
+            {version && <span className="text-[10px] text-slate-500 mt-1">v{version}</span>}
+          </div>
         </div>
         <nav className="mt-4 space-y-1">
           <NavLink to="/" end className={linkClass}>

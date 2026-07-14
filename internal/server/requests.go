@@ -28,18 +28,24 @@ func (s *Server) handleRequestCreate(w http.ResponseWriter, r *http.Request, u *
 	var body struct {
 		ArtistName string `json:"artistName"`
 		ArtistMBID string `json:"artistMbid"`
+		AlbumName  string `json:"albumName"`
+		AlbumMBID  string `json:"albumMbid"`
 	}
 	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.ArtistName) == "" {
 		jsonError(w, http.StatusBadRequest, "artistName required")
 		return
 	}
 	body.ArtistName = strings.TrimSpace(body.ArtistName)
+	if body.AlbumMBID != "" && body.ArtistMBID == "" {
+		jsonError(w, http.StatusBadRequest, "album requests need the artist's MusicBrainz id")
+		return
+	}
 
 	status := "pending"
 	if u.CanAutoApprove || u.Role == "admin" {
 		status = "approved"
 	}
-	id, err := s.st.CreateRequest(u.ID, body.ArtistName, body.ArtistMBID, status)
+	id, err := s.st.CreateRequest(u.ID, body.ArtistName, body.ArtistMBID, body.AlbumName, body.AlbumMBID, status)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			jsonError(w, http.StatusConflict, "you already have an open request for this artist")
@@ -168,8 +174,15 @@ func (s *Server) pushToLidarr(requestID int64) {
 		}
 	}
 
+	// ---- album-level request ----
+	if req.AlbumMBID != "" {
+		s.pushAlbumToLidarr(ctx, requestID, req, inst, apiKey, mbid, fail)
+		return
+	}
+
+	// ---- artist-level request ----
 	lidarrID, err := s.eng.Lidarr.AddArtist(ctx, inst.BaseURL, apiKey, mbid, req.ArtistName,
-		inst.QualityProfileID, inst.MetadataProfileID, inst.RootFolder)
+		inst.QualityProfileID, inst.MetadataProfileID, inst.RootFolder, "all", true)
 	if err != nil {
 		if errors.Is(err, clients.ErrLidarrDuplicate) {
 			s.st.UpdateRequestStatus(requestID, "sent", "already in Lidarr", "", 0)
@@ -180,4 +193,73 @@ func (s *Server) pushToLidarr(requestID int64) {
 	}
 	s.st.UpdateRequestStatus(requestID, "sent", "", "", lidarrID)
 	s.log.Info("request sent to lidarr", "artist", req.ArtistName, "lidarrId", lidarrID)
+}
+
+// pushAlbumToLidarr fulfils a single-album request: ensure the artist exists
+// in Lidarr (added unmonitored if new), wait for Lidarr to populate its album
+// list, then monitor + search just the requested album.
+func (s *Server) pushAlbumToLidarr(ctx context.Context, requestID int64, req *store.Request,
+	inst *store.Instance, apiKey, artistMBID string, fail func(string)) {
+
+	artistID, err := s.eng.Lidarr.FindArtistID(ctx, inst.BaseURL, apiKey, artistMBID)
+	if err != nil {
+		fail("lidarr lookup failed: " + err.Error())
+		return
+	}
+	if artistID == 0 {
+		// New artist: add with nothing monitored so only the requested album
+		// gets grabbed, not the whole discography.
+		artistID, err = s.eng.Lidarr.AddArtist(ctx, inst.BaseURL, apiKey, artistMBID, req.ArtistName,
+			inst.QualityProfileID, inst.MetadataProfileID, inst.RootFolder, "none", false)
+		if err != nil && !errors.Is(err, clients.ErrLidarrDuplicate) {
+			fail(err.Error())
+			return
+		}
+		if artistID == 0 { // duplicate race: look it up again
+			artistID, _ = s.eng.Lidarr.FindArtistID(ctx, inst.BaseURL, apiKey, artistMBID)
+		}
+	}
+	if artistID == 0 {
+		fail("could not find or add the artist in Lidarr")
+		return
+	}
+
+	// Lidarr populates albums asynchronously after an artist is added — poll
+	// briefly until the requested release group shows up.
+	var albumID int64
+	for attempt := 0; attempt < 12; attempt++ {
+		albums, err := s.eng.Lidarr.Albums(ctx, inst.BaseURL, apiKey, artistID)
+		if err == nil {
+			for _, a := range albums {
+				if strings.EqualFold(a.ForeignAlbumID, req.AlbumMBID) {
+					albumID = a.ID
+					break
+				}
+			}
+		}
+		if albumID != 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			fail("timed out waiting for Lidarr to load the artist's albums")
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
+	if albumID == 0 {
+		fail("Lidarr did not list this album for the artist (it may still be refreshing — retry in a minute)")
+		return
+	}
+
+	if err := s.eng.Lidarr.MonitorAlbums(ctx, inst.BaseURL, apiKey, []int64{albumID}, true); err != nil {
+		fail("could not monitor the album: " + err.Error())
+		return
+	}
+	if err := s.eng.Lidarr.SearchAlbums(ctx, inst.BaseURL, apiKey, []int64{albumID}); err != nil {
+		fail("album monitored but search failed to start: " + err.Error())
+		return
+	}
+	s.st.UpdateRequestStatus(requestID, "sent", "", "", albumID)
+	s.log.Info("album request sent to lidarr", "artist", req.ArtistName, "album", req.AlbumName, "albumId", albumID)
 }

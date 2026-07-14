@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { api, User } from './api'
 import Layout from './components/Layout'
 import Admin from './pages/Admin'
+import Artist from './pages/Artist'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Requests from './pages/Requests'
@@ -11,6 +12,7 @@ import Setup from './pages/Setup'
 
 interface AuthState {
   user: User | null
+  version: string
   setUser: (u: User | null) => void
   logout: () => Promise<void>
 }
@@ -28,6 +30,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [setupComplete, setSetupComplete] = useState(true)
   const [user, setUser] = useState<User | null>(null)
+  const [version, setVersion] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -36,6 +39,7 @@ export default function App() {
       .then((s) => {
         setSetupComplete(s.setupComplete)
         setUser(s.user ?? null)
+        setVersion(s.version ?? '')
       })
       .finally(() => setLoading(false))
   }, [])
@@ -58,7 +62,7 @@ export default function App() {
   }
 
   return (
-    <AuthContext.Provider value={{ user, setUser, logout }}>
+    <AuthContext.Provider value={{ user, version, setUser, logout }}>
       <Routes>
         {!setupComplete && (
           <Route path="*" element={<Setup onDone={() => setSetupComplete(true)} />} />
@@ -73,6 +77,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
             <Route path="/search" element={<Search />} />
+            <Route path="/artist/:mbid" element={<Artist />} />
             <Route path="/requests" element={<Requests />} />
             {user.role === 'admin' && <Route path="/admin" element={<Admin />} />}
             <Route path="*" element={<Navigate to="/" replace />} />

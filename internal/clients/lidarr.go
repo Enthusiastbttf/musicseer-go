@@ -90,9 +90,15 @@ func (l Lidarr) Options(ctx context.Context, baseURL, apiKey string) (quality, m
 	return
 }
 
-// AddArtist adds an artist by MusicBrainz ID, monitored, and kicks off a search.
+// AddArtist adds an artist by MusicBrainz ID. monitor controls which albums
+// Lidarr monitors ("all" for artist requests, "none" for album-level requests
+// where we monitor a single album afterwards); search kicks off an immediate
+// missing-albums search.
 func (l Lidarr) AddArtist(ctx context.Context, baseURL, apiKey, mbid, name string,
-	qualityProfileID, metadataProfileID int64, rootFolder string) (int64, error) {
+	qualityProfileID, metadataProfileID int64, rootFolder, monitor string, search bool) (int64, error) {
+	if monitor == "" {
+		monitor = "all"
+	}
 	payload := map[string]any{
 		"foreignArtistId":   mbid,
 		"artistName":        name,
@@ -100,7 +106,7 @@ func (l Lidarr) AddArtist(ctx context.Context, baseURL, apiKey, mbid, name strin
 		"metadataProfileId": metadataProfileID,
 		"rootFolderPath":    rootFolder,
 		"monitored":         true,
-		"addOptions":        map[string]any{"searchForMissingAlbums": true},
+		"addOptions":        map[string]any{"monitor": monitor, "searchForMissingAlbums": search},
 	}
 	var created struct {
 		ID int64 `json:"id"`
@@ -109,8 +115,56 @@ func (l Lidarr) AddArtist(ctx context.Context, baseURL, apiKey, mbid, name strin
 	return created.ID, err
 }
 
+// FindArtistID returns Lidarr's internal id for an artist MBID (0 if absent).
+func (l Lidarr) FindArtistID(ctx context.Context, baseURL, apiKey, mbid string) (int64, error) {
+	artists, err := l.Artists(ctx, baseURL, apiKey)
+	if err != nil {
+		return 0, err
+	}
+	for _, a := range artists {
+		if strings.EqualFold(a.ForeignArtistID, mbid) {
+			return a.ID, nil
+		}
+	}
+	return 0, nil
+}
+
+// LidarrAlbum is one album row from Lidarr.
+type LidarrAlbum struct {
+	ID             int64  `json:"id"`
+	Title          string `json:"title"`
+	ForeignAlbumID string `json:"foreignAlbumId"` // MusicBrainz release-group id
+	Monitored      bool   `json:"monitored"`
+	Statistics     struct {
+		TrackFileCount  int     `json:"trackFileCount"`
+		TotalTrackCount int     `json:"totalTrackCount"`
+		PercentOfTracks float64 `json:"percentOfTracks"`
+	} `json:"statistics"`
+}
+
+// Albums lists all albums Lidarr knows for one of its artists.
+func (l Lidarr) Albums(ctx context.Context, baseURL, apiKey string, artistID int64) ([]LidarrAlbum, error) {
+	var albums []LidarrAlbum
+	err := l.do(ctx, http.MethodGet, baseURL,
+		fmt.Sprintf("/api/v1/album?artistId=%d", artistID), apiKey, nil, &albums)
+	return albums, err
+}
+
+// MonitorAlbums flips the monitored flag for a set of albums.
+func (l Lidarr) MonitorAlbums(ctx context.Context, baseURL, apiKey string, albumIDs []int64, monitored bool) error {
+	return l.do(ctx, http.MethodPut, baseURL, "/api/v1/album/monitor", apiKey,
+		map[string]any{"albumIds": albumIDs, "monitored": monitored}, nil)
+}
+
+// SearchAlbums queues a Lidarr AlbumSearch command.
+func (l Lidarr) SearchAlbums(ctx context.Context, baseURL, apiKey string, albumIDs []int64) error {
+	return l.do(ctx, http.MethodPost, baseURL, "/api/v1/command", apiKey,
+		map[string]any{"name": "AlbumSearch", "albumIds": albumIDs}, nil)
+}
+
 // LidarrArtist is one entry from Lidarr's library.
 type LidarrArtist struct {
+	ID              int64  `json:"id"`
 	ArtistName      string `json:"artistName"`
 	ForeignArtistID string `json:"foreignArtistId"`
 	Monitored       bool   `json:"monitored"`

@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/discovery/recommendations", s.requireUser(s.handleRecommendations))
 	mux.HandleFunc("GET /api/discovery/hidden-gems", s.requireUser(s.handleHiddenGems))
 	mux.HandleFunc("GET /api/search", s.requireUser(s.handleSearch))
+	mux.HandleFunc("GET /api/artist", s.requireUser(s.handleArtistDetail))
 
 	// Requests
 	mux.HandleFunc("GET /api/requests", s.requireUser(s.handleRequestsList))

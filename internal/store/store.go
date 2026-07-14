@@ -38,7 +38,51 @@ func Open(dataDir string) (*Store, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{DB: db}, nil
+}
+
+// migrate upgrades databases created by older versions in place.
+func migrate(db *sql.DB) error {
+	// v2.3.0: album-level requests.
+	var hasAlbum bool
+	rows, err := db.Query("PRAGMA table_info(requests)")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "album_mbid" {
+			hasAlbum = true
+		}
+	}
+	rows.Close()
+	if !hasAlbum {
+		stmts := []string{
+			"ALTER TABLE requests ADD COLUMN album_name TEXT",
+			"ALTER TABLE requests ADD COLUMN album_mbid TEXT",
+			"DROP INDEX IF EXISTS idx_requests_unique_open",
+		}
+		for _, q := range stmts {
+			if _, err := db.Exec(q); err != nil {
+				return err
+			}
+		}
+	}
+	// Created here (not in schema.sql) so it always runs after the album
+	// columns exist, on both fresh and upgraded databases.
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_unique_open2
+		ON requests(user_id, artist_name, IFNULL(album_mbid,'')) WHERE status IN ('pending','approved','sent')`)
+	return err
 }
 
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
@@ -529,6 +573,8 @@ type Request struct {
 	Username   string `json:"username"`
 	ArtistName string `json:"artistName"`
 	ArtistMBID string `json:"artistMbid,omitempty"`
+	AlbumName  string `json:"albumName,omitempty"`
+	AlbumMBID  string `json:"albumMbid,omitempty"`
 	Status     string `json:"status"`
 	LidarrID   int64  `json:"lidarrId,omitempty"`
 	Notes      string `json:"notes,omitempty"`
@@ -537,16 +583,18 @@ type Request struct {
 	UpdatedAt  string `json:"updatedAt"`
 }
 
-func (s *Store) CreateRequest(userID int64, name, mbid string, status string) (int64, error) {
-	res, err := s.DB.Exec("INSERT INTO requests (user_id, artist_name, artist_mbid, status) VALUES (?,?,?,?)",
-		userID, name, nullIfEmpty(mbid), status)
+func (s *Store) CreateRequest(userID int64, name, mbid, albumName, albumMbid, status string) (int64, error) {
+	res, err := s.DB.Exec(
+		"INSERT INTO requests (user_id, artist_name, artist_mbid, album_name, album_mbid, status) VALUES (?,?,?,?,?,?)",
+		userID, name, nullIfEmpty(mbid), nullIfEmpty(albumName), nullIfEmpty(albumMbid), status)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-const reqQuery = `SELECT r.id, r.user_id, u.username, r.artist_name, COALESCE(r.artist_mbid,''), r.status,
+const reqQuery = `SELECT r.id, r.user_id, u.username, r.artist_name, COALESCE(r.artist_mbid,''),
+	COALESCE(r.album_name,''), COALESCE(r.album_mbid,''), r.status,
 	COALESCE(r.lidarr_id,0), COALESCE(r.notes,''), COALESCE(r.error,''), r.created_at, r.updated_at
 	FROM requests r JOIN users u ON u.id = r.user_id`
 
@@ -564,7 +612,8 @@ func (s *Store) RequestsList(userID int64, all bool) ([]Request, error) {
 	var out []Request
 	for rows.Next() {
 		var r Request
-		if err := rows.Scan(&r.ID, &r.UserID, &r.Username, &r.ArtistName, &r.ArtistMBID, &r.Status,
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Username, &r.ArtistName, &r.ArtistMBID,
+			&r.AlbumName, &r.AlbumMBID, &r.Status,
 			&r.LidarrID, &r.Notes, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -576,7 +625,7 @@ func (s *Store) RequestsList(userID int64, all bool) ([]Request, error) {
 func (s *Store) RequestByID(id int64) (*Request, error) {
 	var r Request
 	err := s.DB.QueryRow(reqQuery+" WHERE r.id=?", id).Scan(&r.ID, &r.UserID, &r.Username, &r.ArtistName,
-		&r.ArtistMBID, &r.Status, &r.LidarrID, &r.Notes, &r.Error, &r.CreatedAt, &r.UpdatedAt)
+		&r.ArtistMBID, &r.AlbumName, &r.AlbumMBID, &r.Status, &r.LidarrID, &r.Notes, &r.Error, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -595,9 +644,53 @@ func (s *Store) DeleteRequest(id int64) error {
 	return err
 }
 
+// OpenAlbumRequests returns album MBIDs with an open request for this user or all users.
+func (s *Store) OpenAlbumRequests(artistMbid string) (map[string]bool, error) {
+	rows, err := s.DB.Query(`SELECT DISTINCT album_mbid FROM requests
+		WHERE artist_mbid=? AND album_mbid IS NOT NULL AND status IN ('pending','approved','sent')`, artistMbid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := map[string]bool{}
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		set[m] = true
+	}
+	return set, rows.Err()
+}
+
+// ---------- artist detail cache ----------
+
+func (s *Store) ArtistDetailCached(mbid string, maxAge time.Duration) (json.RawMessage, bool) {
+	var data, cachedAt string
+	if err := s.DB.QueryRow("SELECT data, cached_at FROM artist_detail WHERE mbid=?", mbid).Scan(&data, &cachedAt); err != nil {
+		return nil, false
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.000Z", cachedAt)
+	if err != nil || time.Since(t) > maxAge {
+		return nil, false
+	}
+	return json.RawMessage(data), true
+}
+
+func (s *Store) SaveArtistDetail(mbid, name string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`INSERT INTO artist_detail (mbid, name, data, cached_at) VALUES (?,?,?,?)
+		ON CONFLICT(mbid) DO UPDATE SET name=excluded.name, data=excluded.data, cached_at=excluded.cached_at`,
+		mbid, name, string(data), now())
+	return err
+}
+
 // RequestedNames returns lowercase artist names with an open request.
 func (s *Store) RequestedNames() (map[string]bool, error) {
-	rows, err := s.DB.Query("SELECT DISTINCT lower(artist_name) FROM requests WHERE status IN ('pending','approved','sent')")
+	rows, err := s.DB.Query("SELECT DISTINCT lower(artist_name) FROM requests WHERE album_mbid IS NULL AND status IN ('pending','approved','sent')")
 	if err != nil {
 		return nil, err
 	}

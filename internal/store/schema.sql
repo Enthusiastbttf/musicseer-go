@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS requests (
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     artist_name TEXT NOT NULL,
     artist_mbid TEXT,
+    album_name  TEXT,
+    album_mbid  TEXT,
     status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','sent','failed')),
     instance_id INTEGER REFERENCES instances(id) ON DELETE SET NULL,
     lidarr_id   INTEGER,
@@ -102,13 +104,21 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_unique_open
-    ON requests(user_id, artist_name) WHERE status IN ('pending','approved','sent');
+-- The open-request uniqueness index is created in store.migrate() so it runs
+-- AFTER the album columns are added to databases from older versions.
 
 CREATE TABLE IF NOT EXISTS user_instances (
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     instance_id INTEGER NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, instance_id)
+);
+
+-- Cached artist detail pages: bio + discography (7-day TTL).
+CREATE TABLE IF NOT EXISTS artist_detail (
+    mbid      TEXT PRIMARY KEY,
+    name      TEXT NOT NULL,
+    data      TEXT NOT NULL,
+    cached_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS settings (

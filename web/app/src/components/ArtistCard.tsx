@@ -1,5 +1,6 @@
 import { Check, Clock, Music2, Plus } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, ApiError, ArtistItem } from '../api'
 
 function formatListeners(n?: number) {
@@ -31,9 +32,12 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
     }
   }
 
-  return (
-    <div className="card p-3 group flex flex-col">
-      <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
+  const detailUrl = artist.mbid
+    ? `/artist/${encodeURIComponent(artist.mbid)}?name=${encodeURIComponent(artist.name)}`
+    : null
+
+  const artwork = (
+    <>
         {artist.imageUrl ? (
           <img
             src={artist.imageUrl}
@@ -51,10 +55,23 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
             #{artist.rank}
           </span>
         )}
+    </>
+  )
+
+  return (
+    <div className="card p-3 group flex flex-col">
+      <div className="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-3">
+        {detailUrl ? <Link to={detailUrl}>{artwork}</Link> : artwork}
       </div>
-      <div className="font-semibold text-sm truncate" title={artist.name}>
-        {artist.name}
-      </div>
+      {detailUrl ? (
+        <Link to={detailUrl} className="font-semibold text-sm truncate hover:text-accent hover:underline" title={artist.name}>
+          {artist.name}
+        </Link>
+      ) : (
+        <div className="font-semibold text-sm truncate" title={artist.name}>
+          {artist.name}
+        </div>
+      )}
       <div className="text-xs text-slate-500 truncate h-4">
         {artist.genres?.slice(0, 3).join(' · ') || formatListeners(artist.listeners) || artist.reason || ''}
       </div>
