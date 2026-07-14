@@ -54,10 +54,10 @@ func (s *Server) handleArtistDetail(w http.ResponseWriter, r *http.Request, _ *s
 			out.ImageURL, out.Genres, out.Listeners = m.ImageURL, m.Genres, m.Listeners
 		}
 	}
-	libNames, _ := s.st.LibraryNames()
-	out.InLibrary = libNames[strings.ToLower(detail.Name)]
-	reqNames, _ := s.st.RequestedNames()
-	out.Requested = reqNames[strings.ToLower(detail.Name)]
+	libM, libN, _ := s.st.LibraryIndex()
+	reqM, reqN, _ := s.st.RequestedIndex()
+	out.InLibrary = membership{libM, libN}.has(detail.Name, detail.MBID)
+	out.Requested = membership{reqM, reqN}.has(detail.Name, detail.MBID)
 	albumReqs, _ := s.st.OpenAlbumRequests(detail.MBID)
 
 	// Live ownership overlay from Lidarr (LAN call, fast; skipped gracefully

@@ -176,8 +176,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 		}
 	}
 
-	libNames, _ := s.st.LibraryNames()
-	reqNames, _ := s.st.RequestedNames()
+	libM, libN, _ := s.st.LibraryIndex()
+	reqM, reqN, _ := s.st.RequestedIndex()
+	lib, req := membership{libM, libN}, membership{reqM, reqN}
 	names := make([]string, len(results))
 	nameCount := map[string]int{}
 	for i, a := range results {
@@ -199,14 +200,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 	for _, a := range results {
 		key := strings.ToLower(a.name)
 		ambiguous := nameCount[key] > 1
-		e := entry{Name: a.name, MBID: a.mbid, Disambiguation: a.disamb, InLibrary: libNames[key], Requested: reqNames[key]}
+		e := entry{Name: a.name, MBID: a.mbid, Disambiguation: a.disamb,
+			InLibrary: lib.has(a.name, a.mbid), Requested: req.has(a.name, a.mbid)}
 		if m := meta[key]; m != nil {
 			e.Listeners = m.Listeners
-			// The image cache is keyed by NAME. With several identically-named
-			// artists in one result set we cannot know which one the cached
-			// image belongs to — a placeholder is honest, the wrong band's
-			// album art is not.
-			if !ambiguous {
+			// The image cache is keyed by NAME. Among identically-named
+			// artists, only show the cached image when its stored MBID
+			// proves it belongs to THIS one.
+			if !ambiguous || (m.MBID != "" && strings.EqualFold(m.MBID, a.mbid)) {
 				e.ImageURL = m.ImageURL
 			}
 			if e.MBID == "" {

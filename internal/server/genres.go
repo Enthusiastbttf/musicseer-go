@@ -54,8 +54,9 @@ func (s *Server) handleGenreArtists(w http.ResponseWriter, r *http.Request, _ *s
 		return
 	}
 
-	libNames, _ := s.st.LibraryNames()
-	reqNames, _ := s.st.RequestedNames()
+	libM, libN, _ := s.st.LibraryIndex()
+	reqM, reqN, _ := s.st.RequestedIndex()
+	lib, req := membership{libM, libN}, membership{reqM, reqN}
 	names := make([]string, len(artists))
 	for i, a := range artists {
 		names[i] = a.Name
@@ -76,7 +77,7 @@ func (s *Server) handleGenreArtists(w http.ResponseWriter, r *http.Request, _ *s
 	for _, a := range artists {
 		key := strings.ToLower(a.Name)
 		e := entry{Name: a.Name, MBID: a.MBID, Disambiguation: a.Disambiguation,
-			InLibrary: libNames[key], Requested: reqNames[key]}
+			InLibrary: lib.has(a.Name, a.MBID), Requested: req.has(a.Name, a.MBID)}
 		if m := meta[key]; m != nil {
 			e.ImageURL, e.Listeners, e.Genres = m.ImageURL, m.Listeners, m.Genres
 		}

@@ -381,6 +381,54 @@ func (s *Store) LibraryTop(limit int) ([]LibraryArtist, error) {
 	return out, rows.Err()
 }
 
+// LibraryIndex returns two sets for membership checks: MBIDs of library
+// artists that have one, and lowercase names of those that do not. Matching
+// by MBID first prevents identically-named artists from inheriting each
+// other's "in library" status.
+func (s *Store) LibraryIndex() (mbids, namesNoMbid map[string]bool, err error) {
+	rows, err := s.DB.Query("SELECT lower(name), lower(COALESCE(mbid,'')) FROM library_artists")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	mbids, namesNoMbid = map[string]bool{}, map[string]bool{}
+	for rows.Next() {
+		var name, mbid string
+		if err := rows.Scan(&name, &mbid); err != nil {
+			return nil, nil, err
+		}
+		if mbid != "" {
+			mbids[mbid] = true
+		} else {
+			namesNoMbid[name] = true
+		}
+	}
+	return mbids, namesNoMbid, rows.Err()
+}
+
+// RequestedIndex is the same shape for open artist-level requests.
+func (s *Store) RequestedIndex() (mbids, namesNoMbid map[string]bool, err error) {
+	rows, err := s.DB.Query(`SELECT lower(artist_name), lower(COALESCE(artist_mbid,'')) FROM requests
+		WHERE album_mbid IS NULL AND status IN ('pending','approved','sent')`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	mbids, namesNoMbid = map[string]bool{}, map[string]bool{}
+	for rows.Next() {
+		var name, mbid string
+		if err := rows.Scan(&name, &mbid); err != nil {
+			return nil, nil, err
+		}
+		if mbid != "" {
+			mbids[mbid] = true
+		} else {
+			namesNoMbid[name] = true
+		}
+	}
+	return mbids, namesNoMbid, rows.Err()
+}
+
 // LibraryNames returns a lowercase set of every artist name in any library.
 func (s *Store) LibraryNames() (map[string]bool, error) {
 	rows, err := s.DB.Query("SELECT DISTINCT lower(name) FROM library_artists")
