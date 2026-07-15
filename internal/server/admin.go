@@ -68,6 +68,7 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, admin 
 		Role           *string `json:"role"`
 		CanAutoApprove *bool   `json:"canAutoApprove"`
 		Password       *string `json:"password"`
+		LastfmUser     *string `json:"lastfmUser"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid body")
@@ -95,9 +96,13 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, admin 
 		hs := string(h)
 		hash = &hs
 	}
-	if err := s.st.UpdateUser(id, body.Role, body.CanAutoApprove, hash); err != nil {
+	if err := s.st.UpdateUser(id, body.Role, body.CanAutoApprove, hash, body.LastfmUser); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if body.LastfmUser != nil {
+		// Listening profile changed — rebuild that user's recommendations.
+		s.eng.RefreshUserAsync(id)
 	}
 	u, _ := s.st.UserByID(id)
 	jsonWrite(w, http.StatusOK, u)

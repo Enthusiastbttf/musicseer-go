@@ -86,8 +86,8 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
-	// v2.5.0: Plex account linkage.
-	var hasPlex bool
+	// v2.5.0: Plex account linkage. v2.9.0: per-user Last.fm username.
+	var hasPlex, hasLfUser bool
 	rows, err = db.Query("PRAGMA table_info(users)")
 	if err != nil {
 		return err
@@ -104,10 +104,18 @@ func migrate(db *sql.DB) error {
 		if name == "plex_id" {
 			hasPlex = true
 		}
+		if name == "lastfm_user" {
+			hasLfUser = true
+		}
 	}
 	rows.Close()
 	if !hasPlex {
 		if _, err := db.Exec("ALTER TABLE users ADD COLUMN plex_id TEXT"); err != nil {
+			return err
+		}
+	}
+	if !hasLfUser {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN lastfm_user TEXT"); err != nil {
 			return err
 		}
 	}
@@ -125,24 +133,25 @@ type User struct {
 	PasswordHash   string `json:"-"`
 	Role           string `json:"role"`
 	CanAutoApprove bool   `json:"canAutoApprove"`
+	LastfmUser     string `json:"lastfmUser,omitempty"`
 	CreatedAt      string `json:"createdAt"`
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
-	var email, hash sql.NullString
-	err := row.Scan(&u.ID, &u.Username, &email, &hash, &u.Role, &u.CanAutoApprove, &u.CreatedAt)
+	var email, hash, lfUser sql.NullString
+	err := row.Scan(&u.ID, &u.Username, &email, &hash, &u.Role, &u.CanAutoApprove, &lfUser, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	u.Email, u.PasswordHash = email.String, hash.String
+	u.Email, u.PasswordHash, u.LastfmUser = email.String, hash.String, lfUser.String
 	return &u, nil
 }
 
-const userCols = "id, username, email, password_hash, role, can_auto_approve, created_at"
+const userCols = "id, username, email, password_hash, role, can_auto_approve, lastfm_user, created_at"
 
 func (s *Store) UserCount() (int, error) {
 	var n int
@@ -184,7 +193,7 @@ func (s *Store) CreateUser(username, email, hash, role string, autoApprove bool)
 	return res.LastInsertId()
 }
 
-func (s *Store) UpdateUser(id int64, role *string, autoApprove *bool, hash *string) error {
+func (s *Store) UpdateUser(id int64, role *string, autoApprove *bool, hash *string, lastfmUser *string) error {
 	sets, args := []string{"updated_at=?"}, []any{now()}
 	if role != nil {
 		sets, args = append(sets, "role=?"), append(args, *role)
@@ -194,6 +203,9 @@ func (s *Store) UpdateUser(id int64, role *string, autoApprove *bool, hash *stri
 	}
 	if hash != nil {
 		sets, args = append(sets, "password_hash=?"), append(args, *hash)
+	}
+	if lastfmUser != nil {
+		sets, args = append(sets, "lastfm_user=?"), append(args, nullIfEmpty(strings.TrimSpace(*lastfmUser)))
 	}
 	args = append(args, id)
 	_, err := s.DB.Exec("UPDATE users SET "+strings.Join(sets, ", ")+" WHERE id=?", args...)
@@ -231,7 +243,7 @@ func (s *Store) CreateSession(token string, userID int64, ttl time.Duration) err
 
 func (s *Store) SessionUser(token string) (*User, error) {
 	return scanUser(s.DB.QueryRow(`
-		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.can_auto_approve, u.created_at
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.can_auto_approve, u.lastfm_user, u.created_at
 		FROM sessions se JOIN users u ON u.id = se.user_id
 		WHERE se.token_hash=? AND se.expires_at > ?`, hashToken(token), time.Now().UTC().Format(time.RFC3339)))
 }

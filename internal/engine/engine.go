@@ -343,6 +343,39 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 	if err != nil {
 		return err
 	}
+
+	// Listening-history seeds: when the user has a Last.fm username linked
+	// (and a key is active), what they actually PLAY outweighs what merely
+	// sits on disk. Their top artists of the last 3 months lead the seed
+	// list; library seeds fill the remainder.
+	if e.UsingLastFM() {
+		if u, err := e.st.UserByID(userID); err == nil && u.LastfmUser != "" {
+			if top, err := e.LastFM.UserTopArtists(ctx, u.LastfmUser, "3month", 15); err == nil && len(top) > 0 {
+				listened := make([]store.LibraryArtist, 0, len(top))
+				seen := map[string]bool{}
+				for i, a := range top {
+					listened = append(listened, store.LibraryArtist{
+						Name: a.Name, MBID: a.MBID,
+						Weight: 200 - i*10, // played > owned, in rank order
+					})
+					seen[strings.ToLower(a.Name)] = true
+				}
+				for _, lib := range seeds {
+					if len(listened) >= 25 {
+						break
+					}
+					if !seen[strings.ToLower(lib.Name)] {
+						listened = append(listened, lib)
+					}
+				}
+				seeds = listened
+				e.log.Info("recommendation seeds from listening history", "user", u.Username, "lastfmUser", u.LastfmUser, "seeds", len(seeds))
+			} else if err != nil {
+				e.log.Warn("lastfm listening history unavailable, falling back to library seeds", "lastfmUser", u.LastfmUser, "err", err)
+			}
+		}
+	}
+
 	if len(seeds) == 0 {
 		// Nothing in the library yet: store empty lists so the UI can fall
 		// back to trending without a "computing…" state.

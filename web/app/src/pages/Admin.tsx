@@ -293,6 +293,17 @@ function Users() {
     load()
   }
 
+  const setLastfm = async (u: User) => {
+    const current = u.lastfmUser ?? ''
+    const value = prompt(
+      `Last.fm username for ${u.username}\n\nRecommendations will follow what this Last.fm account actually listens to (top artists, last 3 months). Leave empty to unlink.`,
+      current,
+    )
+    if (value === null || value === current) return
+    await api.put(`/api/users/${u.id}`, { lastfmUser: value.trim() })
+    load()
+  }
+
   const remove = async (u: User) => {
     if (!confirm(`Delete user ${u.username}? Their requests are removed too.`)) return
     await api.del(`/api/users/${u.id}`)
@@ -335,6 +346,13 @@ function Users() {
               </div>
               <div className="text-xs text-slate-500">{u.email || 'no email'}</div>
             </div>
+            <button
+              className="text-xs text-slate-400 hover:text-accent"
+              onClick={() => setLastfm(u)}
+              title="Link a Last.fm account — recommendations follow its listening history"
+            >
+              {u.lastfmUser ? `♫ ${u.lastfmUser}` : '♫ link Last.fm'}
+            </button>
             <label className="flex items-center gap-2 text-xs text-slate-400">
               <input type="checkbox" checked={u.canAutoApprove} onChange={() => toggleAutoApprove(u)} />
               auto-approve

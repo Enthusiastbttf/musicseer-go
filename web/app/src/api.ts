@@ -36,6 +36,7 @@ export interface User {
   email?: string
   role: 'admin' | 'user'
   canAutoApprove: boolean
+  lastfmUser?: string
 }
 
 export interface ArtistItem {

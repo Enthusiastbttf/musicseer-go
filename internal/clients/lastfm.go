@@ -101,6 +101,23 @@ func (l *LastFM) ArtistInfo(ctx context.Context, artist, mbid string) (*LFArtist
 	return resp.Artist, err
 }
 
+// UserTopArtists returns a Last.fm user's most-played artists for a period
+// ("1month", "3month", "12month", "overall"). Public data — no auth needed.
+func (l *LastFM) UserTopArtists(ctx context.Context, user, period string, limit int) ([]LFArtist, error) {
+	var resp struct {
+		TopArtists struct {
+			Artist []LFArtist `json:"artist"`
+		} `json:"topartists"`
+	}
+	err := l.call(ctx, url.Values{
+		"method": {"user.gettopartists"},
+		"user":   {user},
+		"period": {period},
+		"limit":  {strconv.Itoa(limit)},
+	}, &resp)
+	return resp.TopArtists.Artist, err
+}
+
 func (l *LastFM) SearchArtists(ctx context.Context, query string, limit int) ([]LFArtist, error) {
 	var resp struct {
 		Results struct {
