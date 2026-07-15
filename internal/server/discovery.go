@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,7 +166,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 		return
 	}
 
-	type hit struct{ name, mbid, disamb string }
+	type hit struct {
+		name, mbid, disamb string
+		listeners          int64
+	}
 	var results []hit
 	if s.eng.UsingLastFM() {
 		found, err := s.eng.LastFM.SearchArtists(r.Context(), q, 24)
@@ -173,8 +178,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 			return
 		}
 		for _, a := range found {
-			results = append(results, hit{a.Name, a.MBID, ""})
+			listeners, _ := strconv.ParseInt(a.Listeners, 10, 64)
+			results = append(results, hit{a.Name, a.MBID, "", listeners})
 		}
+		// Last.fm's artist index is scrobble-derived and full of phantom
+		// entries from mistagged files. Real artists have real audiences —
+		// rank by listeners so junk sinks, and the counts label the rest.
+		sort.SliceStable(results, func(i, j int) bool { return results[i].listeners > results[j].listeners })
 	} else {
 		found, err := s.eng.MB.SearchArtists(r.Context(), q, 24)
 		if err != nil {
@@ -194,7 +204,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 			if a.Disambiguation != "" {
 				parts = append(parts, a.Disambiguation)
 			}
-			results = append(results, hit{a.Name, a.MBID, strings.Join(parts, " · ")})
+			results = append(results, hit{a.Name, a.MBID, strings.Join(parts, " · "), 0})
 		}
 	}
 
@@ -225,7 +235,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 		e := entry{Name: a.name, MBID: a.mbid, Disambiguation: a.disamb,
 			InLibrary: lib.has(a.name, a.mbid), Requested: req.has(a.name, a.mbid)}
 		if m := meta[key]; m != nil {
-			e.Listeners = m.Listeners
+			if e.Listeners == 0 {
+				e.Listeners = m.Listeners
+			}
 			// The image cache is keyed by NAME. Among identically-named
 			// artists, only show the cached image when its stored MBID
 			// proves it belongs to THIS one.
