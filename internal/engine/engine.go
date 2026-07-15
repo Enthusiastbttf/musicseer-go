@@ -451,6 +451,42 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 		return err
 	}
 
+	// Popularity data is what makes "similar" and "hidden gems" DIFFERENT
+	// lists: without listener counts every candidate scores identically and
+	// the gems filter passes everyone. Last.fm's similar lists don't carry
+	// listeners, so enrich unknown candidates via artist.getinfo — background,
+	// rate-limited, and cached in the artists table so it's one-time per artist.
+	if e.UsingLastFM() {
+		enriched := 0
+		for key, c := range candidates {
+			if enriched >= 150 {
+				break
+			}
+			if m := meta[key]; m != nil && (m.Listeners > 0 || len(m.Genres) > 0) {
+				continue
+			}
+			info, err := e.LastFM.ArtistInfo(ctx, c.name, c.mbid)
+			if err != nil || info == nil {
+				continue
+			}
+			listeners, _ := strconv.ParseInt(info.Stats.Listeners, 10, 64)
+			playcount, _ := strconv.ParseInt(info.Stats.Playcount, 10, 64)
+			var tags []string
+			for _, t := range info.Tags.Tag {
+				tags = append(tags, t.Name)
+			}
+			if len(tags) > 6 {
+				tags = tags[:6]
+			}
+			e.st.UpsertArtist(&store.Artist{Name: c.name, MBID: c.mbid, Listeners: listeners, Playcount: playcount, Genres: tags})
+			enriched++
+		}
+		if enriched > 0 {
+			meta, _ = e.st.ArtistsByNames(names)
+			e.log.Info("candidate popularity enriched", "user", userID, "artists", enriched)
+		}
+	}
+
 	// User genre profile for the diversity score.
 	seedNames := make([]string, len(seeds))
 	for i, s := range seeds {
