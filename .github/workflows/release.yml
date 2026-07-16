@@ -37,13 +37,16 @@ jobs:
       - name: Checksum
         run: sha256sum musicseer-linux-amd64 > checksums.txt
 
+      # Publish with the preinstalled gh CLI rather than a third-party action —
+      # fewer moving parts and a readable error if anything fails.
       - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            musicseer-linux-amd64
-            checksums.txt
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            musicseer-linux-amd64 checksums.txt \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
 
   image:
     runs-on: ubuntu-latest
