@@ -9,14 +9,66 @@ package clients
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+// sensitiveParams are query keys that carry credentials and must never appear
+// in error strings or logs (Last.fm key, Subsonic salt/token, generic tokens).
+var sensitiveParams = []string{"api_key", "apikey", "token", "t", "s", "sk"}
+
+// sanitizeURL redacts credential-bearing query parameters and any userinfo from
+// a URL so it is safe to embed in an error or log line.
+func sanitizeURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "[unparseable-url]"
+	}
+	if q := u.Query(); len(q) > 0 {
+		changed := false
+		for _, k := range sensitiveParams {
+			if q.Has(k) {
+				q.Set(k, "REDACTED")
+				changed = true
+			}
+		}
+		if changed {
+			u.RawQuery = q.Encode()
+		}
+	}
+	return u.Redacted() // also masks any user:password in the URL
+}
+
+// sanitizeErr scrubs the URL embedded in *url.Error (what net/http returns on
+// transport failures) so a network hiccup can't leak a key into the logs.
+func sanitizeErr(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = sanitizeURL(ue.URL)
+		return ue
+	}
+	return err
+}
+
+// readCapped reads up to limit bytes and reports an explicit error if the body
+// is larger, instead of silently truncating into invalid JSON.
+func readCapped(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response body exceeds %d bytes (raise the limit or paginate)", limit)
+	}
+	return data, nil
+}
 
 // limiter is a minimal token-interval rate limiter (one request per interval).
 type limiter struct {
@@ -73,11 +125,11 @@ func getJSON(ctx context.Context, lim *limiter, url string, headers map[string]s
 			continue
 		}
 		if status == 429 || status >= 500 {
-			lastErr = fmt.Errorf("%s: HTTP %d: %.200s", url, status, string(body))
+			lastErr = fmt.Errorf("%s: HTTP %d: %.200s", sanitizeURL(url), status, string(body))
 			continue
 		}
 		if status >= 400 {
-			return fmt.Errorf("%s: HTTP %d: %.200s", url, status, string(body))
+			return fmt.Errorf("%s: HTTP %d: %.200s", sanitizeURL(url), status, string(body))
 		}
 		return json.Unmarshal(body, out)
 	}
@@ -94,10 +146,10 @@ func doGET(ctx context.Context, url string, headers map[string]string) ([]byte, 
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, sanitizeErr(err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, err := readCapped(resp.Body, 8<<20)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,10 +35,31 @@ type Server struct {
 
 	loginMu    sync.Mutex
 	loginFails map[string][]time.Time // simple per-IP login throttle
+
+	trustedProxies []*net.IPNet // parsed cfg.TrustedProxies; XFF trusted only from these
 }
 
+// maxLoginBuckets caps the login-throttle map so forged, per-request client IPs
+// can't grow it without bound (memory-exhaustion guard).
+const maxLoginBuckets = 4096
+
 func New(cfg config.Config, st *store.Store, box *secrets.Box, eng *engine.Engine, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, st: st, box: box, eng: eng, log: log, loginFails: map[string][]time.Time{}}
+	s := &Server{cfg: cfg, st: st, box: box, eng: eng, log: log, loginFails: map[string][]time.Time{}}
+	for _, p := range cfg.TrustedProxies {
+		if !strings.Contains(p, "/") {
+			if strings.Contains(p, ":") {
+				p += "/128" // IPv6 host
+			} else {
+				p += "/32" // IPv4 host
+			}
+		}
+		if _, ipnet, err := net.ParseCIDR(p); err == nil {
+			s.trustedProxies = append(s.trustedProxies, ipnet)
+		} else {
+			log.Warn("ignoring invalid MUSICSEER_TRUSTED_PROXIES entry", "value", p, "err", err)
+		}
+	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -181,7 +203,11 @@ func queryLimit(r *http.Request, def, max int) int {
 
 func newToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing is catastrophic — never emit a weak/predictable
+		// token (session or Plex client id). Fail loudly instead.
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -197,15 +223,46 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 	})
 }
 
-func clientIP(r *http.Request) string {
-	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-		return strings.TrimSpace(strings.Split(xf, ",")[0])
+// clientIP resolves the real client address for throttling. X-Forwarded-For is
+// honored ONLY when the immediate peer (r.RemoteAddr) is a configured trusted
+// proxy, and then the rightmost non-proxy hop is used — a client cannot forge
+// the header to escape the login throttle. With no trusted proxies configured
+// (the default), the direct peer address is always used.
+func (s *Server) clientIP(r *http.Request) string {
+	host := hostOnly(r.RemoteAddr)
+	if !s.isTrustedProxy(host) {
+		return host
 	}
-	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i > 0 {
-		host = host[:i]
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		parts := strings.Split(xf, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := strings.TrimSpace(parts[i])
+			if ip != "" && !s.isTrustedProxy(ip) {
+				return ip
+			}
+		}
 	}
 	return host
+}
+
+func (s *Server) isTrustedProxy(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, n := range s.trustedProxies {
+		if n.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+func hostOnly(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 // loginAllowed implements a small sliding-window throttle: 10 failures / 15 min.
@@ -219,14 +276,28 @@ func (s *Server) loginAllowed(ip string) bool {
 			kept = append(kept, t)
 		}
 	}
-	s.loginFails[ip] = kept
+	if len(kept) == 0 {
+		delete(s.loginFails, ip) // don't retain empty buckets
+	} else {
+		s.loginFails[ip] = kept
+	}
 	return len(kept) < 10
 }
 
 func (s *Server) recordLoginFailure(ip string) {
 	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	// Guard against unbounded growth from many distinct source IPs: once the map
+	// is saturated, sweep buckets that have aged out of the window.
+	if len(s.loginFails) >= maxLoginBuckets {
+		cutoff := time.Now().Add(-15 * time.Minute)
+		for k, times := range s.loginFails {
+			if len(times) == 0 || times[len(times)-1].Before(cutoff) {
+				delete(s.loginFails, k)
+			}
+		}
+	}
 	s.loginFails[ip] = append(s.loginFails[ip], time.Now())
-	s.loginMu.Unlock()
 }
 
 // ---------- SPA ----------

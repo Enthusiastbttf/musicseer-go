@@ -68,7 +68,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	if !s.loginAllowed(ip) {
 		jsonError(w, http.StatusTooManyRequests, "too many failed attempts, try again later")
 		return

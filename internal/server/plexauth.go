@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"strings"
 
 	"musicseer/internal/store"
 )
@@ -102,7 +101,7 @@ func (s *Server) handlePlexPoll(w http.ResponseWriter, r *http.Request) {
 
 	user := s.plexUserFromAccount(plexUser.ID, plexUser.Username, plexUser.Email)
 	if user == nil {
-		jsonError(w, http.StatusInternalServerError, "could not create local account")
+		jsonError(w, http.StatusForbidden, "could not sign you in with Plex; an unlinked local account may already use this name — contact the administrator")
 		return
 	}
 	s.startSession(w, r, user.ID)
@@ -112,28 +111,34 @@ func (s *Server) handlePlexPoll(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// plexUserFromAccount maps a plex.tv account onto a local user:
-// linked plex_id first, then username match (links it), else a new account.
+// plexUserFromAccount maps a plex.tv account onto a local user, keyed ONLY on
+// the immutable numeric Plex account id. It deliberately does NOT fall back to
+// matching by Plex username/email: those are freely editable by the account
+// owner, so matching on them let any Plex-server member sign in as a local
+// account whose name/email they copied — including the admin (account takeover).
+// Linking an existing local account to Plex must be done from an already
+// authenticated session, never inferred during sign-in.
 func (s *Server) plexUserFromAccount(id int64, username, email string) *store.User {
-	plexID := strings.TrimSpace(strings.ToLower(username)) // stable fallback
-	if id != 0 {
-		plexID = itoa64(id)
+	if id == 0 {
+		s.log.Warn("plex account has no numeric id; refusing sign-in", "username", username)
+		return nil
 	}
+	plexID := itoa64(id)
 	if u, err := s.st.UserByPlexID(plexID); err == nil {
-		return u
-	}
-	if u, err := s.st.UserByLogin(username); err == nil {
-		s.st.LinkPlex(u.ID, plexID)
 		return u
 	}
 	uid, err := s.st.CreateUser(username, email, "", "user", false)
 	if err != nil {
-		s.log.Warn("plex user create failed", "username", username, "err", err)
+		// A local account with this username/email already exists but is NOT
+		// linked to this Plex id. Refuse rather than adopt it. The operator can
+		// link the accounts deliberately from an authenticated session.
+		s.log.Warn("plex sign-in refused: unlinked local account name collision or create error",
+			"username", username, "err", err)
 		return nil
 	}
 	s.st.LinkPlex(uid, plexID)
 	u, _ := s.st.UserByID(uid)
-	s.log.Info("plex user signed up", "username", username)
+	s.log.Info("plex user signed up", "username", username, "plex_id", plexID)
 	return u
 }
 

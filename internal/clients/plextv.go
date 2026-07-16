@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,7 +52,7 @@ func (p PlexTV) do(ctx context.Context, method, path, clientID, token string, ou
 		return err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, err := readCapped(resp.Body, 4<<20)
 	if err != nil {
 		return err
 	}

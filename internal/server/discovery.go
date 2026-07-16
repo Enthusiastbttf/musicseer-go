@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -12,6 +13,10 @@ import (
 	"musicseer/internal/engine"
 	"musicseer/internal/store"
 )
+
+// interactiveSearchDeadline bounds a live search against Last.fm/MusicBrainz so
+// a slow upstream fails fast instead of hanging the request.
+const interactiveSearchDeadline = 8 * time.Second
 
 // handleTrending serves the trending chart straight from SQLite — a handful
 // of rows plus one batched metadata lookup. No external calls, ever.
@@ -165,6 +170,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 		jsonWrite(w, http.StatusOK, []any{})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), interactiveSearchDeadline)
+	defer cancel()
 
 	type hit struct {
 		name, mbid, disamb string
@@ -172,7 +179,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 	}
 	var results []hit
 	if s.eng.UsingLastFM() {
-		found, err := s.eng.LastFM.SearchArtists(r.Context(), q, 24)
+		found, err := s.eng.LastFM.SearchArtists(ctx, q, 24)
 		if err != nil {
 			jsonError(w, http.StatusBadGateway, "search failed: "+err.Error())
 			return
@@ -186,7 +193,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *store.U
 		// rank by listeners so junk sinks, and the counts label the rest.
 		sort.SliceStable(results, func(i, j int) bool { return results[i].listeners > results[j].listeners })
 	} else {
-		found, err := s.eng.MB.SearchArtists(r.Context(), q, 24)
+		found, err := s.eng.MB.SearchArtists(ctx, q, 24)
 		if err != nil {
 			jsonError(w, http.StatusBadGateway, "search failed: "+err.Error())
 			return

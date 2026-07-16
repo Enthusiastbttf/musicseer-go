@@ -245,6 +245,7 @@ func (s *Server) pushAlbumBatch(requestIDs []int64) {
 		wanted[strings.ToLower(r.AlbumMBID)] = r
 	}
 	found := map[string]int64{} // album mbid -> lidarr album id
+pollLoop:
 	for attempt := 0; attempt < 60 && len(found) < len(wanted); attempt++ {
 		albums, err := s.eng.Lidarr.Albums(ctx, inst.BaseURL, apiKey, artistID)
 		if err == nil {
@@ -260,7 +261,10 @@ func (s *Server) pushAlbumBatch(requestIDs []int64) {
 		}
 		select {
 		case <-ctx.Done():
-			break
+			// Context cancelled/expired: stop polling and fulfil whatever was
+			// found so far. `break` alone would only exit the select and keep
+			// hammering Lidarr with a dead context for the remaining attempts.
+			break pollLoop
 		case <-time.After(5 * time.Second):
 		}
 	}

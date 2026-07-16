@@ -36,7 +36,10 @@ func (l Lidarr) do(ctx context.Context, method, baseURL, path, apiKey string, bo
 		return err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	// Lidarr is a trusted self-hosted instance and returns the whole library in
+	// one response — allow a generous cap and fail loudly rather than silently
+	// truncating a large library into invalid JSON.
+	data, err := readCapped(resp.Body, 128<<20)
 	if err != nil {
 		return err
 	}

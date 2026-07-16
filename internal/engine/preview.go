@@ -25,6 +25,8 @@ var (
 // when album is set — the tracks of that specific album (matched by
 // artist+title, which disambiguates identically-named artists).
 func (e *Engine) Previews(ctx context.Context, artist, album string) ([]clients.DeezerTrack, error) {
+	ctx, cancel := context.WithTimeout(ctx, interactiveDeadline)
+	defer cancel()
 	key := artist + "\x00" + album
 	previewMu.Lock()
 	if entry, ok := previewCache[key]; ok && time.Since(entry.at) < 12*time.Hour {
@@ -65,6 +67,8 @@ type AlbumTrack struct {
 // (authoritative track list, no samples). MB results cache 30 days; Deezer
 // results ride the in-memory preview cache since its sample URLs expire.
 func (e *Engine) AlbumTrackList(ctx context.Context, artist, album, rgMBID string) ([]AlbumTrack, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, interactiveDeadline)
+	defer cancel()
 	// Deezer path (also serves the play-button previews).
 	if tracks, err := e.Previews(ctx, artist, album); err == nil && len(tracks) > 0 {
 		out := make([]AlbumTrack, 0, len(tracks))

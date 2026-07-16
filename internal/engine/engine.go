@@ -10,6 +10,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -82,6 +83,15 @@ func (e *Engine) setStatus(job, outcome string) {
 	e.mu.Unlock()
 }
 
+// recoverPanic logs and swallows a panic in a background goroutine. Without it,
+// a panic from malformed third-party data in any background job would crash the
+// whole process, taking down the otherwise-healthy interactive server.
+func (e *Engine) recoverPanic(where string) {
+	if r := recover(); r != nil {
+		e.log.Error("recovered from panic in background job", "where", where, "panic", fmt.Sprintf("%v", r))
+	}
+}
+
 func (e *Engine) Status() map[string]string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -110,7 +120,17 @@ func (e *Engine) schedule(ctx context.Context, name string, every time.Duration,
 			return
 		case <-timer.C:
 		}
-		if err := fn(ctx); err != nil {
+		// Convert a panic in the job into an error so one bad run logs and the
+		// scheduler keeps running instead of the process crashing.
+		err := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic: %v", r)
+				}
+			}()
+			return fn(ctx)
+		}()
+		if err != nil {
 			e.log.Warn("job failed", "job", name, "err", err)
 			e.setStatus(name, "error: "+err.Error())
 		} else {
@@ -185,6 +205,7 @@ type namedMBID struct{ name, mbid string }
 // enrichChart resolves MusicBrainz IDs and genre tags for chart artists that
 // lack them — rate-limited, cached, converges after the first run.
 func (e *Engine) enrichChart(ctx context.Context, entries []namedMBID) {
+	defer e.recoverPanic("enrichChart")
 	var pairs []namedMBID
 	for _, a := range entries {
 		mbid := a.mbid
@@ -207,6 +228,7 @@ func (e *Engine) enrichChart(ctx context.Context, entries []namedMBID) {
 }
 
 func (e *Engine) enrichGenres(ctx context.Context, artists []namedMBID) {
+	defer e.recoverPanic("enrichGenres")
 	for _, a := range artists {
 		if a.mbid == "" {
 			continue
@@ -627,6 +649,7 @@ func (e *Engine) RefreshUserAsync(userID int64) {
 		return
 	}
 	go func() {
+		defer e.recoverPanic("refreshUser")
 		defer e.inflight.Delete(key)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -651,6 +674,7 @@ func (e *Engine) enqueueImage(name, mbid string) {
 // imageWorker resolves artist images (Deezer, then AudioDB) at a polite pace.
 // This is the ONLY place image lookups happen — never during a page load.
 func (e *Engine) imageWorker(ctx context.Context) {
+	defer e.recoverPanic("imageWorker")
 	backfill := time.NewTicker(10 * time.Minute)
 	defer backfill.Stop()
 	seen := map[string]time.Time{}

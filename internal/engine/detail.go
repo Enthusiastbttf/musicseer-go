@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+// interactiveDeadline bounds how long an on-demand page fetch (artist detail,
+// genre, track list, previews, search) may block on external services before
+// failing fast to stale/cached data. Without it, a slow or rate-limit-contended
+// MusicBrainz could hang a page load for tens of seconds (stacked retries plus
+// the shared limiter queue). Background jobs deliberately do NOT use this — they
+// may run much longer.
+const interactiveDeadline = 8 * time.Second
+
 // AlbumDetail is one discography entry on the artist page.
 type AlbumDetail struct {
 	MBID           string   `json:"mbid"`
@@ -33,6 +41,8 @@ type ArtistDetail struct {
 // call — this is the second interactive endpoint (after search) allowed to
 // call out, because a first visit to an artist page is inherently on-demand.
 func (e *Engine) GetArtistDetail(ctx context.Context, name, mbid string) (*ArtistDetail, error) {
+	ctx, cancel := context.WithTimeout(ctx, interactiveDeadline)
+	defer cancel()
 	if mbid == "" {
 		var err error
 		mbid, err = e.MB.SearchArtistMBID(ctx, name)
@@ -101,6 +111,8 @@ type GenreArtist struct {
 // GetGenreArtists returns artists for a genre tag, cache-first (7-day TTL).
 // Cold fetch = one MusicBrainz tag search.
 func (e *Engine) GetGenreArtists(ctx context.Context, genre string) ([]GenreArtist, error) {
+	ctx, cancel := context.WithTimeout(ctx, interactiveDeadline)
+	defer cancel()
 	if raw, ok := e.st.GenreCached(genre, 7*24*time.Hour); ok {
 		var out []GenreArtist
 		if json.Unmarshal(raw, &out) == nil {

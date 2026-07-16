@@ -16,7 +16,9 @@ type Subsonic struct{}
 
 func subsonicParams(username, password string) url.Values {
 	saltBytes := make([]byte, 6)
-	rand.Read(saltBytes)
+	if _, err := rand.Read(saltBytes); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	salt := hex.EncodeToString(saltBytes)
 	sum := md5.Sum([]byte(password + salt))
 	return url.Values{
