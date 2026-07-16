@@ -119,6 +119,12 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+
+	// v2.10.0: Hidden Gems was removed. Purge any stale 'gems' recommendation
+	// rows so they don't linger unused. Idempotent.
+	if _, err := db.Exec("DELETE FROM recommendations WHERE kind='gems'"); err != nil {
+		return err
+	}
 	return nil
 }
 
