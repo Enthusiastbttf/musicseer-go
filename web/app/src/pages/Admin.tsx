@@ -1,6 +1,6 @@
-import { Plug, RefreshCw, Trash2, UserPlus } from 'lucide-react'
+import { ArrowUpCircle, CheckCircle2, Plug, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useState } from 'react'
-import { api, Instance, User } from '../api'
+import { api, ApiError, Instance, User } from '../api'
 import { useAuth } from '../App'
 
 type Tab = 'instances' | 'users' | 'connections' | 'status'
@@ -618,7 +618,109 @@ function Status() {
         </div>
         {msg && <p className="text-xs text-slate-500">{msg}</p>}
       </div>
+      <UpdateCard current={stats.version} />
       <p className="text-xs text-slate-600">MusicSeer {stats.version}</p>
+    </div>
+  )
+}
+
+interface UpdateInfo {
+  current: string
+  latest: string
+  updateAvailable: boolean
+  releaseUrl?: string
+}
+
+function UpdateCard({ current }: { current: string }) {
+  const [info, setInfo] = useState<UpdateInfo | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const check = useCallback(async () => {
+    setChecking(true)
+    setMsg('')
+    try {
+      setInfo(await api.get<UpdateInfo>('/api/admin/update'))
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : 'Could not check for updates')
+    } finally {
+      setChecking(false)
+    }
+  }, [])
+
+  // Check once when the Status tab opens.
+  useEffect(() => {
+    check()
+  }, [check])
+
+  const apply = async () => {
+    if (!info) return
+    setUpdating(true)
+    setMsg(`Updating to v${info.latest}… the app will restart, this page will reload automatically.`)
+    try {
+      await api.post('/api/admin/update')
+    } catch (e) {
+      setUpdating(false)
+      setMsg(e instanceof ApiError ? e.message : 'Update failed')
+      return
+    }
+    // Poll /api/status until the running version changes, then reload.
+    const target = info.latest
+    const started = Date.now()
+    const t = setInterval(async () => {
+      if (Date.now() - started > 120000) {
+        clearInterval(t)
+        setMsg('Update is taking longer than expected — check the service, then reload.')
+        return
+      }
+      try {
+        const st = await api.get<{ version: string }>('/api/status')
+        if (st.version === target) {
+          clearInterval(t)
+          window.location.reload()
+        }
+      } catch {
+        /* server restarting — keep polling */
+      }
+    }, 3000)
+  }
+
+  return (
+    <div className="card p-6 space-y-3">
+      <h3 className="font-bold flex items-center gap-2">
+        <ArrowUpCircle size={16} /> Software update
+      </h3>
+      {info?.updateAvailable ? (
+        <>
+          <p className="text-sm text-slate-300">
+            Version <b>v{info.latest}</b> is available (you're on v{current}).
+          </p>
+          <div className="flex items-center gap-2">
+            <button className="btn bg-accent text-white" onClick={apply} disabled={updating}>
+              {updating ? <RefreshCw size={14} className="animate-spin" /> : <ArrowUpCircle size={14} />}
+              {updating ? 'Updating…' : `Update to v${info.latest}`}
+            </button>
+            {info.releaseUrl && (
+              <a className="btn-ghost" href={info.releaseUrl} target="_blank" rel="noreferrer">
+                Release notes
+              </a>
+            )}
+          </div>
+        </>
+      ) : info ? (
+        <p className="text-sm text-slate-400 flex items-center gap-2">
+          <CheckCircle2 size={15} className="text-emerald-500" /> You're on the latest version (v{current}).
+        </p>
+      ) : (
+        <p className="text-sm text-slate-500">{checking ? 'Checking for updates…' : 'Update status unavailable.'}</p>
+      )}
+      <div className="flex items-center gap-3">
+        <button className="btn-ghost" onClick={check} disabled={checking || updating}>
+          <RefreshCw size={14} className={checking ? 'animate-spin' : ''} /> Check again
+        </button>
+        {msg && <p className="text-xs text-slate-500">{msg}</p>}
+      </div>
     </div>
   )
 }

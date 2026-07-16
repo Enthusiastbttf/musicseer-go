@@ -27,10 +27,17 @@ jobs:
           docker rm extract
           file musicseer-linux-amd64
 
+      # Publish a checksum so the in-app updater can verify the download before
+      # swapping the running binary.
+      - name: Checksum
+        run: sha256sum musicseer-linux-amd64 > checksums.txt
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: musicseer-linux-amd64
+          files: |
+            musicseer-linux-amd64
+            checksums.txt
           generate_release_notes: true
 
   image:

@@ -116,10 +116,6 @@ func (s *Server) handleRecommendations(w http.ResponseWriter, r *http.Request, u
 	s.serveRecs(w, r, u, "similar")
 }
 
-func (s *Server) handleHiddenGems(w http.ResponseWriter, r *http.Request, u *store.User) {
-	s.serveRecs(w, r, u, "gems")
-}
-
 // handlePreview returns 30-second sample tracks for an artist (Deezer,
 // keyless, cached 12h in memory). Interactive-on-demand like search.
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, _ *store.User) {

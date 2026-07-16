@@ -75,7 +75,6 @@ func (s *Server) Handler() http.Handler {
 	// Discovery (DB reads only)
 	mux.HandleFunc("GET /api/discovery/trending", s.requireUser(s.handleTrending))
 	mux.HandleFunc("GET /api/discovery/recommendations", s.requireUser(s.handleRecommendations))
-	mux.HandleFunc("GET /api/discovery/hidden-gems", s.requireUser(s.handleHiddenGems))
 	mux.HandleFunc("GET /api/search", s.requireUser(s.handleSearch))
 	mux.HandleFunc("GET /api/artist", s.requireUser(s.handleArtistDetail))
 	mux.HandleFunc("GET /api/discovery/genres", s.requireUser(s.handleGenres))
@@ -90,6 +89,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/admin/plex", s.requireAdmin(s.handlePlexConfigSet))
 	mux.HandleFunc("GET /api/admin/lastfm", s.requireAdmin(s.handleLastfmGet))
 	mux.HandleFunc("POST /api/admin/lastfm", s.requireAdmin(s.handleLastfmSet))
+	mux.HandleFunc("GET /api/admin/update", s.requireAdmin(s.handleUpdateCheck))
+	mux.HandleFunc("POST /api/admin/update", s.requireAdmin(s.handleUpdateApply))
 
 	// Requests
 	mux.HandleFunc("GET /api/requests", s.requireUser(s.handleRequestsList))

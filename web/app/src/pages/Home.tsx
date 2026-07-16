@@ -1,4 +1,4 @@
-import { Gem, Globe2, RefreshCw, Sparkles, TrendingUp } from 'lucide-react'
+import { Globe2, RefreshCw, Sparkles, TrendingUp } from 'lucide-react'
 import { ReactNode, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ArtistItem, RecsResponse } from '../api'
@@ -124,36 +124,28 @@ function GenresSection() {
 export default function Home() {
   const [trending, setTrending] = useState<ArtistItem[]>([])
   const [recs, setRecs] = useState<RecsResponse | null>(null)
-  const [gems, setGems] = useState<RecsResponse | null>(null)
   const [loadingTrending, setLoadingTrending] = useState(true)
   const [loadingRecs, setLoadingRecs] = useState(true)
-  const [loadingGems, setLoadingGems] = useState(true)
 
-  // All three sections come out of SQLite server-side, so they load in
+  // Both sections come out of SQLite server-side, so they load in
   // milliseconds — no spinner marathon like the old app.
   useEffect(() => {
     api.get<ArtistItem[]>('/api/discovery/trending?limit=18')
       .then(setTrending).catch(() => {}).finally(() => setLoadingTrending(false))
     api.get<RecsResponse>('/api/discovery/recommendations?limit=18')
       .then(setRecs).catch(() => {}).finally(() => setLoadingRecs(false))
-    api.get<RecsResponse>('/api/discovery/hidden-gems?limit=18')
-      .then(setGems).catch(() => {}).finally(() => setLoadingGems(false))
   }, [])
 
   // If recommendations are still computing, poll gently until they arrive.
   useEffect(() => {
-    if (!recs?.computing && !gems?.computing) return
+    if (!recs?.computing) return
     const t = setInterval(async () => {
-      const [r, g] = await Promise.all([
-        api.get<RecsResponse>('/api/discovery/recommendations?limit=18').catch(() => null),
-        api.get<RecsResponse>('/api/discovery/hidden-gems?limit=18').catch(() => null),
-      ])
+      const r = await api.get<RecsResponse>('/api/discovery/recommendations?limit=18').catch(() => null)
       if (r) setRecs(r)
-      if (g) setGems(g)
-      if (r && !r.computing && g && !g.computing) clearInterval(t)
+      if (r && !r.computing) clearInterval(t)
     }, 8000)
     return () => clearInterval(t)
-  }, [recs?.computing, gems?.computing])
+  }, [recs?.computing])
 
   return (
     <div className="space-y-10 max-w-[1600px]">
@@ -165,14 +157,6 @@ export default function Home() {
         items={recs?.items ?? []}
         loading={loadingRecs}
         computing={recs?.computing}
-      />
-      <Section
-        icon={<Gem size={20} />}
-        title="Hidden Gems"
-        subtitle="loved by fans, under 500K listeners"
-        items={gems?.items ?? []}
-        loading={loadingGems}
-        computing={gems?.computing}
       />
       <GenresSection />
     </div>

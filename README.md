@@ -8,7 +8,6 @@ MusicSeer Enhanced is an Overseerr-style request front end for music, built for 
 
 - 🔥 **Trending Now** — Deezer's mainstream streaming chart (or Last.fm with a key), refreshed in the background with instant artwork
 - 🎯 **Similar to Your Library** — personalized recommendations scored on popularity, similarity, genre diversity and freshness
-- 💎 **Hidden Gems** — artists your library says you'll love, outside the mainstream
 - 🔎 **Search** — MusicBrainz-backed with country/type/disambiguation lines so identically-named artists are tellable apart
 - 👤 **Artist pages** — bio, full discography (albums/EPs/singles) with Cover Art Archive artwork, live Lidarr ownership badges (incl. partial %), per-album requests
 - ☑️ **Album picker** — request several albums at once from a dialog; fulfilled as one batched Lidarr conversation
@@ -83,7 +82,22 @@ Everything is environment variables (a `.env` file in the working directory is a
 | `MUSICSEER_LIBRARY_INTERVAL` | `12h` | library sync + recommendation rebuild |
 | `MUSICSEER_RECS_TTL` | `12h` | staleness threshold before background refresh |
 | `MUSICSEER_SESSION_TTL` | `720h` | login session lifetime |
+| `MUSICSEER_TRUSTED_PROXIES` | — | comma-separated CIDRs/IPs (e.g. your reverse proxy) whose `X-Forwarded-For` is trusted for login throttling; unset = use the direct peer |
 | `MUSICSEER_LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error` |
+
+## Updating
+
+**In-app (Admin → Status → Software update):** MusicSeer checks GitHub for the latest release; click **Update** and it downloads the new binary, verifies its published SHA-256, swaps itself and restarts. This requires the binary's directory to be writable by the service user — the LXC installer and systemd unit set this up (the binary dir is owned by `musicseer` and listed in `ReadWritePaths`). Downloads are always checksum-verified before the swap.
+
+Already running an older install where `/opt/musicseer` is root-owned? Enable in-app updates once:
+
+```bash
+pct exec 112 -- bash -c 'chown -R musicseer:musicseer /opt/musicseer &&
+  sed -i "s#^ReadWritePaths=.*#ReadWritePaths=/var/lib/musicseer /opt/musicseer#" /etc/systemd/system/musicseer.service &&
+  systemctl daemon-reload && systemctl restart musicseer'
+```
+
+**CLI (always works):** `systemctl stop musicseer && curl -fsSL <release-url>/musicseer-linux-amd64 -o /opt/musicseer/musicseer && chmod 755 /opt/musicseer/musicseer && systemctl start musicseer`. The DB schema migrates itself in place either way.
 
 ## Building from source
 

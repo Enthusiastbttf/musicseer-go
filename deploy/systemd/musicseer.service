@@ -19,7 +19,11 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/musicseer
+# /opt/musicseer is writable so the in-app updater can replace the binary and
+# re-exec. It must also be owned by the musicseer user (chown -R). Downloads are
+# SHA-256-verified against the release before the swap. Drop /opt/musicseer here
+# (and from the chown) if you prefer CLI-only upgrades.
+ReadWritePaths=/var/lib/musicseer /opt/musicseer
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true

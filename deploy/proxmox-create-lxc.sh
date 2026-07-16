@@ -109,7 +109,8 @@ useradd --system --home /var/lib/musicseer --shell /usr/sbin/nologin musicseer 2
 mkdir -p /opt/musicseer /var/lib/musicseer /etc/musicseer
 mv /opt/musicseer.bin /opt/musicseer/musicseer
 chmod 755 /opt/musicseer/musicseer
-chown -R musicseer:musicseer /var/lib/musicseer
+# Own the binary dir so the in-app updater can replace the binary and re-exec.
+chown -R musicseer:musicseer /var/lib/musicseer /opt/musicseer
 
 if [[ ! -f /etc/musicseer/musicseer.env ]]; then
 cat > /etc/musicseer/musicseer.env <<EOF
@@ -141,7 +142,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/musicseer
+ReadWritePaths=/var/lib/musicseer /opt/musicseer
 PrivateTmp=true
 
 [Install]

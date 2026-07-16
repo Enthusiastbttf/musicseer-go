@@ -93,8 +93,8 @@ Old and new are now running simultaneously on different IPs. On the new one:
    the Lidarr **quality profile / metadata profile / root folder** from the
    dropdowns (the old app hardcoded IDs; these must be set once).
 3. Admin → Status → **Sync library**, confirm artist count looks right.
-4. Wait for “Similar to Your Library” / “Hidden Gems” to populate (first
-   build takes a minute or two of background work).
+4. Wait for “Similar to Your Library” to populate (first build takes a
+   minute or two of background work).
 5. Request a test artist and watch it appear in Lidarr; delete it in Lidarr
    afterwards if it was just a test.
 

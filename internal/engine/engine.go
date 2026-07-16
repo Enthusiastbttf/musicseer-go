@@ -356,10 +356,10 @@ const (
 	wFreshness  = 0.1
 )
 
-// ComputeRecommendations builds both the "similar to you" and "hidden gems"
-// lists for one user and persists them. External calls: at most one Last.fm
-// similar-artists fetch per seed (30-day cached), executed with bounded
-// concurrency. Everything else is batch SQLite.
+// ComputeRecommendations builds the "similar to your library" list for one user
+// and persists it. External calls: at most one Last.fm similar-artists fetch per
+// seed (30-day cached), executed with bounded concurrency. Everything else is
+// batch SQLite.
 func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error {
 	seeds, err := e.st.LibraryTop(20)
 	if err != nil {
@@ -399,10 +399,9 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 	}
 
 	if len(seeds) == 0 {
-		// Nothing in the library yet: store empty lists so the UI can fall
+		// Nothing in the library yet: store an empty list so the UI can fall
 		// back to trending without a "computing…" state.
 		e.st.SaveRecommendations(userID, "similar", []Recommendation{})
-		e.st.SaveRecommendations(userID, "gems", []Recommendation{})
 		return nil
 	}
 
@@ -458,7 +457,6 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 	}
 	if len(candidates) == 0 {
 		e.st.SaveRecommendations(userID, "similar", []Recommendation{})
-		e.st.SaveRecommendations(userID, "gems", []Recommendation{})
 		return nil
 	}
 
@@ -473,11 +471,11 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 		return err
 	}
 
-	// Popularity data is what makes "similar" and "hidden gems" DIFFERENT
-	// lists: without listener counts every candidate scores identically and
-	// the gems filter passes everyone. Last.fm's similar lists don't carry
-	// listeners, so enrich unknown candidates via artist.getinfo — background,
-	// rate-limited, and cached in the artists table so it's one-time per artist.
+	// Popularity data sharpens the "similar" ranking: without listener counts
+	// every candidate scores identically on the popularity term. Last.fm's
+	// similar lists don't carry listeners, so enrich unknown candidates via
+	// artist.getinfo — rate-limited, and cached in the artists table so it's
+	// one-time per artist.
 	if e.UsingLastFM() {
 		enriched := 0
 		for key, c := range candidates {
@@ -566,29 +564,6 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 		top = top[:60]
 	}
 	if err := e.st.SaveRecommendations(userID, "similar", top); err != nil {
-		return err
-	}
-
-	// Hidden gems: strong similarity, small audience. "Small" = under 500K
-	// Last.fm listeners, or unknown-but-not-charting (keyless mode has no
-	// global listener counts, so absence from the trending chart stands in).
-	trendingNow, _, _ := e.st.Trending("global", 100)
-	charting := make(map[string]bool, len(trendingNow))
-	for _, t := range trendingNow {
-		charting[strings.ToLower(t.Name)] = true
-	}
-	gems := make([]Recommendation, 0, 60)
-	for _, r := range recs {
-		small := (r.Listeners > 0 && r.Listeners < 500_000) || (r.Listeners == 0 && !charting[strings.ToLower(r.Name)])
-		if r.Similarity >= 0.3 && small {
-			gems = append(gems, r)
-		}
-	}
-	sort.Slice(gems, func(i, j int) bool { return gems[i].Similarity > gems[j].Similarity })
-	if len(gems) > 60 {
-		gems = gems[:60]
-	}
-	if err := e.st.SaveRecommendations(userID, "gems", gems); err != nil {
 		return err
 	}
 
