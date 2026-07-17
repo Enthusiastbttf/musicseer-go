@@ -41,6 +41,49 @@ func (d *Deezer) ChartArtists(ctx context.Context, limit int) ([]DeezerChartArti
 	return resp.Data, nil
 }
 
+// DeezerTrackHit is one track from a keyword search: enough to show a rich
+// result row (cover, artist, album, 30-second preview) and to navigate to the
+// artist page. Deezer has no MBID concept, so the artist is matched by name.
+type DeezerTrackHit struct {
+	Title    string
+	Artist   string
+	Album    string
+	CoverURL string
+	Preview  string
+	Duration int
+}
+
+// SearchTracks does a keyword track search (keyless). Deezer's /search is the
+// best keyless option here: it returns the artist name, album title, cover art
+// and a 30-second preview URL in one call.
+func (d *Deezer) SearchTracks(ctx context.Context, query string, limit int) ([]DeezerTrackHit, error) {
+	var resp struct {
+		Data []struct {
+			Title    string `json:"title"`
+			Preview  string `json:"preview"`
+			Duration int    `json:"duration"`
+			Artist   struct {
+				Name string `json:"name"`
+			} `json:"artist"`
+			Album struct {
+				Title string `json:"title"`
+				Cover string `json:"cover_medium"`
+			} `json:"album"`
+		} `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim, deezerBase()+"/search?limit="+fmtInt(limit)+"&q="+url.QueryEscape(query), nil, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]DeezerTrackHit, 0, len(resp.Data))
+	for _, t := range resp.Data {
+		out = append(out, DeezerTrackHit{
+			Title: t.Title, Artist: t.Artist.Name, Album: t.Album.Title,
+			CoverURL: t.Album.Cover, Preview: t.Preview, Duration: t.Duration,
+		})
+	}
+	return out, nil
+}
+
 // AlbumPreviews finds an album by artist+title (a much more precise match
 // than artist name alone) and returns its tracks' 30-second samples.
 func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit int) ([]DeezerTrack, error) {

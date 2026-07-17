@@ -58,6 +58,17 @@ export interface RecsResponse {
   computing?: boolean
 }
 
+export interface TrackHit {
+  track: string
+  artist: string
+  album?: string
+  coverUrl?: string
+  preview?: string
+  duration?: number
+  inLibrary?: boolean
+  requested?: boolean
+}
+
 export interface RequestItem {
   id: number
   userId: number

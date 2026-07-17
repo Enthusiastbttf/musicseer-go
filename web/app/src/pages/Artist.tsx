@@ -30,7 +30,10 @@ interface ArtistDetail {
 }
 
 export default function Artist() {
-  const { mbid } = useParams()
+  const { mbid: rawMbid } = useParams()
+  // "_" is the sentinel used by name-only links (e.g. song-search results that
+  // carry no MBID); treat it as empty so the server resolves the MBID by name.
+  const mbid = rawMbid === '_' ? '' : rawMbid
   const [params] = useSearchParams()
   const name = params.get('name') ?? ''
   const [detail, setDetail] = useState<ArtistDetail | null>(null)

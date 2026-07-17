@@ -116,6 +116,53 @@ func (s *Server) handleRecommendations(w http.ResponseWriter, r *http.Request, u
 	s.serveRecs(w, r, u, "similar")
 }
 
+// handleSearchTracks searches by song title (keyless, via Deezer) and returns
+// rich rows: title, artist, album, cover art and a 30-second preview. Deezer
+// has no MBID, so each row links to the artist page by name (which resolves the
+// MBID there). The artist's library/requested state is joined in from SQLite.
+func (s *Server) handleSearchTracks(w http.ResponseWriter, r *http.Request, _ *store.User) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		jsonWrite(w, http.StatusOK, []any{})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), interactiveSearchDeadline)
+	defer cancel()
+
+	hits, err := s.eng.Deezer.SearchTracks(ctx, q, 30)
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, "song search failed: "+err.Error())
+		return
+	}
+	libM, libN, _ := s.st.LibraryIndex()
+	reqM, reqN, _ := s.st.RequestedIndex()
+	lib, req := membership{libM, libN}, membership{reqM, reqN}
+
+	type entry struct {
+		Track     string `json:"track"`
+		Artist    string `json:"artist"`
+		Album     string `json:"album,omitempty"`
+		CoverURL  string `json:"coverUrl,omitempty"`
+		Preview   string `json:"preview,omitempty"`
+		Duration  int    `json:"duration,omitempty"`
+		InLibrary bool   `json:"inLibrary"`
+		Requested bool   `json:"requested"`
+	}
+	out := make([]entry, 0, len(hits))
+	for _, h := range hits {
+		if h.Title == "" || h.Artist == "" {
+			continue
+		}
+		out = append(out, entry{
+			Track: h.Title, Artist: h.Artist, Album: h.Album, CoverURL: h.CoverURL,
+			Preview: h.Preview, Duration: h.Duration,
+			InLibrary: lib.has(h.Artist, ""), Requested: req.has(h.Artist, ""),
+		})
+	}
+	w.Header().Set("Cache-Control", "private, max-age=120")
+	jsonWrite(w, http.StatusOK, out)
+}
+
 // handlePreview returns 30-second sample tracks for an artist (Deezer,
 // keyless, cached 12h in memory). Interactive-on-demand like search.
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, _ *store.User) {
