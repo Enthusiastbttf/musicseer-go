@@ -198,7 +198,7 @@ export default function Artist() {
         </div>
       </header>
 
-      <TopTracks artist={detail.name} albums={detail.albums} />
+      <TopTracks artist={detail.name} albums={detail.albums} mbid={detail.mbid} />
 
       {sections.map(
         ([title, entries]) =>
@@ -305,14 +305,17 @@ function typeLabel(a: AlbumEntry): string {
   return a.type
 }
 
-function TopTracks({ artist, albums }: { artist: string; albums: AlbumEntry[] }) {
+function TopTracks({ artist, albums, mbid }: { artist: string; albums: AlbumEntry[]; mbid: string }) {
   const [tracks, setTracks] = useState<PreviewTrack[] | null>(null)
   const [playingKey, setPlayingKey] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get<{ tracks: PreviewTrack[] }>(`/api/preview?artist=${encodeURIComponent(artist)}`)
+    // Pass the MBID so the server can disambiguate the Deezer artist against
+    // this artist's discography (same name can be a different band).
+    const q = `/api/preview?artist=${encodeURIComponent(artist)}${mbid ? `&mbid=${encodeURIComponent(mbid)}` : ''}`
+    api.get<{ tracks: PreviewTrack[] }>(q)
       .then((r) => setTracks(r.tracks)).catch(() => setTracks([]))
-  }, [artist])
+  }, [artist, mbid])
   useEffect(() => subscribe(setPlayingKey), [])
 
   // Prebuild a normalized-title index of the discography for O(1) lookups.

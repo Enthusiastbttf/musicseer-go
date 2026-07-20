@@ -27,7 +27,7 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
     e.stopPropagation()
     setPreviewBusy(true)
     try {
-      const found = await playArtist(artist.name)
+      const found = await playArtist(artist.name, artist.mbid)
       if (!found) setNoPreview(true)
     } catch {
       setNoPreview(true)

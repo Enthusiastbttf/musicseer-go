@@ -70,13 +70,13 @@ export async function playAlbum(artist: string, album: string): Promise<boolean>
 }
 
 /** Fetch an artist's previews and play the first one (toggle behavior). */
-export async function playArtist(artist: string): Promise<boolean> {
+export async function playArtist(artist: string, mbid?: string): Promise<boolean> {
   if (currentKey === artist) {
     stop()
     return true
   }
   const res = await api.get<{ tracks: PreviewTrack[] }>(
-    `/api/preview?artist=${encodeURIComponent(artist)}`,
+    `/api/preview?artist=${encodeURIComponent(artist)}${mbid ? `&mbid=${encodeURIComponent(mbid)}` : ''}`,
   )
   if (!res.tracks.length) return false
   playUrl(artist, res.tracks[0].preview)

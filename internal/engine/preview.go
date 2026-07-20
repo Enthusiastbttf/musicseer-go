@@ -24,10 +24,10 @@ var (
 // Previews returns 30-second sample tracks: an artist's top tracks, or —
 // when album is set — the tracks of that specific album (matched by
 // artist+title, which disambiguates identically-named artists).
-func (e *Engine) Previews(ctx context.Context, artist, album string) ([]clients.DeezerTrack, error) {
+func (e *Engine) Previews(ctx context.Context, artist, album, mbid string) ([]clients.DeezerTrack, error) {
 	ctx, cancel := context.WithTimeout(ctx, interactiveDeadline)
 	defer cancel()
-	key := artist + "\x00" + album
+	key := artist + "\x00" + album + "\x00" + mbid
 	previewMu.Lock()
 	if entry, ok := previewCache[key]; ok && time.Since(entry.at) < 12*time.Hour {
 		previewMu.Unlock()
@@ -37,9 +37,20 @@ func (e *Engine) Previews(ctx context.Context, artist, album string) ([]clients.
 
 	var tracks []clients.DeezerTrack
 	var err error
-	if album != "" {
+	switch {
+	case album != "":
 		tracks, err = e.Deezer.AlbumPreviews(ctx, artist, album, 50)
-	} else {
+	case mbid != "":
+		// Disambiguate the Deezer artist against the known discography so top
+		// tracks come from THIS artist, not a different band with the same name.
+		var known []string
+		if d, derr := e.GetArtistDetail(ctx, artist, mbid); derr == nil {
+			for _, a := range d.Albums {
+				known = append(known, a.Title)
+			}
+		}
+		tracks, err = e.Deezer.TopPreviewsFor(ctx, artist, known, 5)
+	default:
 		tracks, err = e.Deezer.TopPreviews(ctx, artist, 5)
 	}
 	if err != nil {
@@ -70,7 +81,7 @@ func (e *Engine) AlbumTrackList(ctx context.Context, artist, album, rgMBID strin
 	ctx, cancel := context.WithTimeout(ctx, interactiveDeadline)
 	defer cancel()
 	// Deezer path (also serves the play-button previews).
-	if tracks, err := e.Previews(ctx, artist, album); err == nil && len(tracks) > 0 {
+	if tracks, err := e.Previews(ctx, artist, album, ""); err == nil && len(tracks) > 0 {
 		out := make([]AlbumTrack, 0, len(tracks))
 		for i, t := range tracks {
 			out = append(out, AlbumTrack{Position: i + 1, Title: t.Title, Duration: t.Duration, Preview: t.Preview})

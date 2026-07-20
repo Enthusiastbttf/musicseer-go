@@ -127,21 +127,27 @@ type DeezerTrack struct {
 	Album    string `json:"album,omitempty"`
 }
 
-// TopPreviews returns an artist's top tracks with 30-second sample URLs.
-func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]DeezerTrack, error) {
+// searchArtistIDs returns up to `limit` Deezer artist IDs for a name query,
+// in Deezer's relevance order (most popular first).
+func (d *Deezer) searchArtistIDs(ctx context.Context, name string, limit int) ([]int64, error) {
 	var search struct {
 		Data []struct {
 			ID int64 `json:"id"`
 		} `json:"data"`
 	}
-	if err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit=1&q="+url.QueryEscape(name), nil, &search); err != nil {
+	if err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit="+fmtInt(limit)+"&q="+url.QueryEscape(name), nil, &search); err != nil {
 		return nil, err
 	}
-	if len(search.Data) == 0 {
-		return nil, nil
+	ids := make([]int64, 0, len(search.Data))
+	for _, a := range search.Data {
+		ids = append(ids, a.ID)
 	}
-	// Deezer's /top track objects carry the album they appear on; capture the
-	// title so the UI can label each top track without another API call.
+	return ids, nil
+}
+
+// artistTop fetches one Deezer artist's top tracks with the album each appears
+// on, dropping tracks that have no playable preview.
+func (d *Deezer) artistTop(ctx context.Context, id int64, limit int) ([]DeezerTrack, error) {
 	var top struct {
 		Data []struct {
 			Title    string `json:"title"`
@@ -153,7 +159,7 @@ func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]Dee
 		} `json:"data"`
 	}
 	if err := getJSON(ctx, d.lim,
-		deezerBase()+"/artist/"+strconv.FormatInt(search.Data[0].ID, 10)+"/top?limit="+fmtInt(limit), nil, &top); err != nil {
+		deezerBase()+"/artist/"+strconv.FormatInt(id, 10)+"/top?limit="+fmtInt(limit), nil, &top); err != nil {
 		return nil, err
 	}
 	out := make([]DeezerTrack, 0, len(top.Data))
@@ -163,6 +169,84 @@ func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]Dee
 		}
 	}
 	return out, nil
+}
+
+// TopPreviews returns the most-relevant same-named Deezer artist's top tracks.
+// Use TopPreviewsFor when a discography is available to disambiguate.
+func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]DeezerTrack, error) {
+	ids, err := d.searchArtistIDs(ctx, name, 1)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	return d.artistTop(ctx, ids[0], limit)
+}
+
+// TopPreviewsFor picks, among same-named Deezer artists, the one whose top
+// tracks' albums best overlap knownAlbums (the artist's MusicBrainz
+// discography), then returns that artist's top tracks. This stops Deezer's
+// name-only lookup from returning a different band that shares the name (e.g.
+// the 1980s metal "Incubus" vs the rock one). Falls back to the most-relevant
+// match when nothing overlaps or no discography is supplied.
+func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []string, limit int) ([]DeezerTrack, error) {
+	ids, err := d.searchArtistIDs(ctx, name, 5)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	known := make(map[string]struct{}, len(knownAlbums))
+	for _, a := range knownAlbums {
+		if k := normAlbum(a); k != "" {
+			known[k] = struct{}{}
+		}
+	}
+
+	var firstNonEmpty, best []DeezerTrack
+	bestScore := 0
+	for i, id := range ids {
+		tracks, err := d.artistTop(ctx, id, limit)
+		if err != nil || len(tracks) == 0 {
+			continue
+		}
+		if firstNonEmpty == nil {
+			firstNonEmpty = tracks
+		}
+		if len(known) == 0 {
+			return tracks, nil // nothing to disambiguate against
+		}
+		score := 0
+		for _, t := range tracks {
+			if t.Album != "" {
+				if _, ok := known[normAlbum(t.Album)]; ok {
+					score++
+				}
+			}
+		}
+		if score > bestScore {
+			bestScore, best = score, tracks
+		}
+		if i == 0 && score > 0 {
+			return tracks, nil // Deezer's top match already fits — skip the rest
+		}
+	}
+	if bestScore > 0 {
+		return best, nil
+	}
+	return firstNonEmpty, nil // no overlap anywhere; best-effort = most relevant
+}
+
+// normAlbum normalizes an album title for loose overlap matching: lowercase,
+// drop a trailing "(...)"/"[...]" qualifier, keep only ASCII alphanumerics.
+func normAlbum(s string) string {
+	s = strings.ToLower(s)
+	if i := strings.LastIndexAny(s, "(["); i > 0 {
+		s = s[:i]
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteByte(byte(r))
+		}
+	}
+	return b.String()
 }
 
 func (d *Deezer) ArtistImage(ctx context.Context, name string) (string, error) {
