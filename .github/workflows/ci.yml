@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Build the frontend first: web/embed.go uses //go:embed all:dist, so
+      # web/dist must exist before the Go packages will compile.
+      - name: Build frontend (emits web/dist)
+        working-directory: web/app
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Vet, build, test
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./...
