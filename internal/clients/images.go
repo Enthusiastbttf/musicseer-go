@@ -100,20 +100,31 @@ func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit 
 		return nil, nil
 	}
 	var tracks struct {
-		Data []DeezerTrack `json:"data"`
+		Data []struct {
+			Title    string `json:"title"`
+			Preview  string `json:"preview"`
+			Duration int    `json:"duration"`
+		} `json:"data"`
 	}
 	if err := getJSON(ctx, d.lim,
 		deezerBase()+"/album/"+strconv.FormatInt(search.Data[0].ID, 10)+"/tracks?limit="+fmtInt(limit), nil, &tracks); err != nil {
 		return nil, err
 	}
-	return tracks.Data, nil
+	out := make([]DeezerTrack, 0, len(tracks.Data))
+	for _, t := range tracks.Data {
+		out = append(out, DeezerTrack{Title: t.Title, Preview: t.Preview, Duration: t.Duration})
+	}
+	return out, nil
 }
 
-// DeezerTrack is one preview-able track.
+// DeezerTrack is one preview-able track. Album is the release the track
+// appears on; it is populated only for artist top tracks (TopPreviews) and
+// left empty for album track lists, where the album is already known.
 type DeezerTrack struct {
 	Title    string `json:"title"`
 	Preview  string `json:"preview"` // 30s MP3 sample URL
 	Duration int    `json:"duration"`
+	Album    string `json:"album,omitempty"`
 }
 
 // TopPreviews returns an artist's top tracks with 30-second sample URLs.
@@ -129,8 +140,17 @@ func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]Dee
 	if len(search.Data) == 0 {
 		return nil, nil
 	}
+	// Deezer's /top track objects carry the album they appear on; capture the
+	// title so the UI can label each top track without another API call.
 	var top struct {
-		Data []DeezerTrack `json:"data"`
+		Data []struct {
+			Title    string `json:"title"`
+			Preview  string `json:"preview"`
+			Duration int    `json:"duration"`
+			Album    struct {
+				Title string `json:"title"`
+			} `json:"album"`
+		} `json:"data"`
 	}
 	if err := getJSON(ctx, d.lim,
 		deezerBase()+"/artist/"+strconv.FormatInt(search.Data[0].ID, 10)+"/top?limit="+fmtInt(limit), nil, &top); err != nil {
@@ -139,7 +159,7 @@ func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]Dee
 	out := make([]DeezerTrack, 0, len(top.Data))
 	for _, t := range top.Data {
 		if t.Preview != "" {
-			out = append(out, t)
+			out = append(out, DeezerTrack{Title: t.Title, Preview: t.Preview, Duration: t.Duration, Album: t.Album.Title})
 		}
 	}
 	return out, nil

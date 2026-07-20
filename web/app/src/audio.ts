@@ -5,6 +5,7 @@ export interface PreviewTrack {
   title: string
   preview: string
   duration: number
+  album?: string // release the track appears on (top tracks only)
 }
 
 type Listener = (playingKey: string | null) => void

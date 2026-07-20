@@ -198,7 +198,7 @@ export default function Artist() {
         </div>
       </header>
 
-      <TopTracks artist={detail.name} />
+      <TopTracks artist={detail.name} albums={detail.albums} />
 
       {sections.map(
         ([title, entries]) =>
@@ -284,7 +284,28 @@ export default function Artist() {
   )
 }
 
-function TopTracks({ artist }: { artist: string }) {
+// Normalize an album title for matching: lowercase, strip diacritics, drop a
+// trailing parenthetical/bracketed qualifier like "(Deluxe)" or "[Remastered]",
+// and collapse punctuation. Used to line a top track's Deezer album up with an
+// entry in the artist's MusicBrainz discography.
+function normTitle(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s*[([].*?[)\]]\s*$/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+// A short type label derived from the matched discography entry (Album / EP /
+// Single, or the secondary type for live/compilation releases).
+function typeLabel(a: AlbumEntry): string {
+  if (a.type === 'Album' && a.secondaryTypes?.length) return a.secondaryTypes[0]
+  return a.type
+}
+
+function TopTracks({ artist, albums }: { artist: string; albums: AlbumEntry[] }) {
   const [tracks, setTracks] = useState<PreviewTrack[] | null>(null)
   const [playingKey, setPlayingKey] = useState<string | null>(null)
 
@@ -293,6 +314,9 @@ function TopTracks({ artist }: { artist: string }) {
       .then((r) => setTracks(r.tracks)).catch(() => setTracks([]))
   }, [artist])
   useEffect(() => subscribe(setPlayingKey), [])
+
+  // Prebuild a normalized-title index of the discography for O(1) lookups.
+  const byTitle = new Map(albums.map((a) => [normTitle(a.title), a]))
 
   if (tracks === null) return null
   if (tracks.length === 0)
@@ -313,6 +337,9 @@ function TopTracks({ artist }: { artist: string }) {
         {tracks.map((t, i) => {
           const key = `${artist}::${i}`
           const active = playingKey === key
+          const matched = t.album ? byTitle.get(normTitle(t.album)) : undefined
+          const albumLabel = matched?.title ?? t.album
+          const badge = matched ? typeLabel(matched) : undefined
           return (
             <button
               key={key}
@@ -322,8 +349,20 @@ function TopTracks({ artist }: { artist: string }) {
               <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-white' : 'bg-white/10 text-slate-300'}`}>
                 {active ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
               </span>
-              <span className="text-sm truncate">{t.title}</span>
-              {active && <span className="ml-auto text-[10px] text-accent uppercase tracking-widest shrink-0">playing</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm truncate">{t.title}</span>
+                {albumLabel && (
+                  <span className="block text-xs text-slate-500 truncate">
+                    {albumLabel}
+                    {badge && (
+                      <span className="ml-1.5 px-1.5 py-px rounded bg-white/10 text-[9px] uppercase tracking-wide text-slate-400">
+                        {badge}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </span>
+              {active && <span className="text-[10px] text-accent uppercase tracking-widest shrink-0">playing</span>}
             </button>
           )
         })}
