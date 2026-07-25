@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	// Discovery (DB reads only)
 	mux.HandleFunc("GET /api/discovery/trending", s.requireUser(s.handleTrending))
 	mux.HandleFunc("GET /api/discovery/recommendations", s.requireUser(s.handleRecommendations))
+	mux.HandleFunc("GET /api/discovery/listening", s.requireUser(s.handleListening))
 	mux.HandleFunc("GET /api/search", s.requireUser(s.handleSearch))
 	mux.HandleFunc("GET /api/search/tracks", s.requireUser(s.handleSearchTracks))
 	mux.HandleFunc("GET /api/artist", s.requireUser(s.handleArtistDetail))

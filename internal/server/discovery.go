@@ -116,6 +116,28 @@ func (s *Server) handleRecommendations(w http.ResponseWriter, r *http.Request, u
 	s.serveRecs(w, r, u, "similar")
 }
 
+// handleListening tells the Discover page what the current user's
+// recommendations are based on: their linked Last.fm username and recent top
+// artists (when both a key is active and a username is linked), so the UI can
+// show "based on your recent listening" — or prompt to link when it isn't.
+func (s *Server) handleListening(w http.ResponseWriter, r *http.Request, u *store.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), interactiveSearchDeadline)
+	defer cancel()
+	resp := map[string]any{
+		"linked":     u.LastfmUser != "",
+		"lastfmUser": u.LastfmUser,
+		"keyActive":  s.eng.UsingLastFM(),
+		"artists":    []string{},
+	}
+	if u.LastfmUser != "" && s.eng.UsingLastFM() {
+		if a := s.eng.UserListeningArtists(ctx, u.LastfmUser, 8); a != nil {
+			resp["artists"] = a
+		}
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	jsonWrite(w, http.StatusOK, resp)
+}
+
 // handleSearchTracks searches by song title (keyless, via Deezer) and returns
 // rich rows: title, artist, album, cover art and a 30-second preview. Deezer
 // has no MBID, so each row links to the artist page by name (which resolves the

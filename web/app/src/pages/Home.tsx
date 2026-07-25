@@ -1,8 +1,74 @@
-import { Globe2, RefreshCw, Sparkles, TrendingUp } from 'lucide-react'
+import { Globe2, Headphones, Music4, RefreshCw, Sparkles, TrendingUp } from 'lucide-react'
 import { ReactNode, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ArtistItem, RecsResponse } from '../api'
+import { useAuth } from '../App'
 import ArtistCard from '../components/ArtistCard'
+
+interface ListeningInfo {
+  linked: boolean
+  lastfmUser: string
+  keyActive: boolean
+  artists: string[]
+}
+
+// Shows what recommendations are based on — the user's recent Last.fm top
+// artists — or prompts to link when the pipeline isn't wired up, so the
+// silent library-only fallback is never invisible again.
+function ListeningBanner() {
+  const { user } = useAuth()
+  const [info, setInfo] = useState<ListeningInfo | null>(null)
+  useEffect(() => {
+    api.get<ListeningInfo>('/api/discovery/listening').then(setInfo).catch(() => {})
+  }, [])
+  if (!info || !info.keyActive) return null // no key = personalization unavailable; nothing to say here
+
+  if (info.linked && info.artists.length > 0) {
+    return (
+      <div className="flex items-start gap-2.5 text-sm text-slate-400 -mt-4">
+        <Headphones size={16} className="text-accent mt-0.5 shrink-0" />
+        <p>
+          Personalized from your recent listening as{' '}
+          <span className="text-slate-300 font-medium">{info.lastfmUser}</span>:{' '}
+          <span className="text-slate-300">{info.artists.join(', ')}</span>
+        </p>
+      </div>
+    )
+  }
+
+  if (info.linked) {
+    // Linked but no top artists yet (fresh link / no recent scrobbles).
+    return (
+      <div className="flex items-center gap-2.5 text-sm text-slate-400 -mt-4">
+        <Headphones size={16} className="text-accent shrink-0" />
+        <p>
+          Linked as <span className="text-slate-300 font-medium">{info.lastfmUser}</span> — recommendations will
+          personalize as your listening builds up.
+        </p>
+      </div>
+    )
+  }
+
+  // Not linked: recommendations are library-only. Make the fix obvious.
+  return (
+    <div className="card p-4 flex items-start gap-3 border border-amber-500/20 bg-amber-500/5 -mt-4">
+      <Music4 size={18} className="text-amber-400 mt-0.5 shrink-0" />
+      <div className="text-sm">
+        <p className="text-slate-200 font-medium">Recommendations aren’t personalized yet</p>
+        <p className="text-slate-400 mt-0.5">
+          They’re based only on your library. Link a Last.fm account to base them on what you actually play.{' '}
+          {user?.role === 'admin' ? (
+            <Link to="/admin" className="text-accent hover:underline">
+              Link it in Admin → Users →
+            </Link>
+          ) : (
+            <span>Ask your administrator to link your Last.fm account.</span>
+          )}
+        </p>
+      </div>
+    </div>
+  )
+}
 
 function Section({
   icon,
@@ -150,6 +216,7 @@ export default function Home() {
   return (
     <div className="space-y-10 max-w-[1600px]">
       <h1 className="text-2xl font-bold">Discover</h1>
+      <ListeningBanner />
       <Section icon={<TrendingUp size={20} />} title="Trending Now" items={trending} loading={loadingTrending} />
       <Section
         icon={<Sparkles size={20} />}
