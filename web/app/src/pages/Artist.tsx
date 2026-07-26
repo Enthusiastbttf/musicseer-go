@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, CheckSquare, Clock, Disc3, ListPlus, Music2, Pause, Play, Plus, Square, X, Youtube } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { PreviewTrack, playAlbum, playUrl, subscribe } from '../audio'
@@ -319,10 +319,22 @@ function TopTracks({ artist, albums, mbid }: { artist: string; albums: AlbumEntr
   useEffect(() => subscribe(setPlayingKey), [])
 
   // Prebuild a normalized-title index of the discography for O(1) lookups.
-  const byTitle = new Map(albums.map((a) => [normTitle(a.title), a]))
+  const byTitle = useMemo(() => new Map(albums.map((a) => [normTitle(a.title), a])), [albums])
+
+  // The server already drops top tracks whose album isn't in this artist's
+  // discography; this is the belt-and-braces so a row can never render without
+  // an Album/EP/Single badge (the two normalizers can disagree at the margins).
+  // If nothing survives — a missing or unusually-titled discography — show the
+  // unfiltered list rather than an empty section.
+  const shown = useMemo(() => {
+    if (!tracks) return []
+    if (albums.length === 0) return tracks
+    const kept = tracks.filter((t) => t.album && byTitle.has(normTitle(t.album)))
+    return kept.length > 0 ? kept : tracks
+  }, [tracks, albums, byTitle])
 
   if (tracks === null) return null
-  if (tracks.length === 0)
+  if (shown.length === 0)
     return (
       <p className="text-xs text-slate-600">
         No samples found on Deezer under this artist name — try the play buttons on individual albums
@@ -337,7 +349,7 @@ function TopTracks({ artist, albums, mbid }: { artist: string; albums: AlbumEntr
         <span className="text-xs text-slate-600">30-second samples</span>
       </div>
       <div className="card divide-y divide-white/5 max-w-2xl">
-        {tracks.map((t, i) => {
+        {shown.map((t, i) => {
           const key = `${artist}::${i}`
           const active = playingKey === key
           const matched = t.album ? byTitle.get(normTitle(t.album)) : undefined

@@ -125,6 +125,24 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec("DELETE FROM recommendations WHERE kind='gems'"); err != nil {
 		return err
 	}
+
+	// One-shot cache purges, gated on PRAGMA user_version so they run once per
+	// upgrade instead of on every restart.
+	var userVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
+		return err
+	}
+	// v2.12.3: discographies fetched before this release were truncated at 100
+	// release groups. Drop the cached copies so they are refetched complete —
+	// top-track album matching now depends on the discography being whole.
+	if userVersion < 1 {
+		if _, err := db.Exec("DELETE FROM artist_detail"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("PRAGMA user_version = 1"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

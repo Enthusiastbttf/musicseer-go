@@ -183,10 +183,16 @@ func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]Dee
 
 // TopPreviewsFor picks, among same-named Deezer artists, the one whose top
 // tracks' albums best overlap knownAlbums (the artist's MusicBrainz
-// discography), then returns that artist's top tracks. This stops Deezer's
-// name-only lookup from returning a different band that shares the name (e.g.
-// the 1980s metal "Incubus" vs the rock one). Falls back to the most-relevant
-// match when nothing overlaps or no discography is supplied.
+// discography), and returns ONLY that artist's tracks whose album is in the
+// discography. This does two jobs: it stops Deezer's name-only lookup from
+// returning a different band that shares the name (e.g. the 1980s metal
+// "Incubus" vs the rock one), and it drops individual stray tracks — features,
+// compilation appearances, or another artist's release that Deezer filed under
+// this name — that don't belong to this artist at all.
+//
+// Falls back to the most-relevant unfiltered match when no discography is
+// supplied or nothing overlaps anywhere, so a thin/missing MusicBrainz
+// discography degrades to the old behaviour instead of an empty section.
 func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []string, limit int) ([]DeezerTrack, error) {
 	ids, err := d.searchArtistIDs(ctx, name, 5)
 	if err != nil || len(ids) == 0 {
@@ -198,11 +204,15 @@ func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []
 			known[k] = struct{}{}
 		}
 	}
+	// Over-fetch so that dropping mismatched tracks still leaves a full list.
+	fetch := limit * 4
+	if fetch < 20 {
+		fetch = 20
+	}
 
 	var firstNonEmpty, best []DeezerTrack
-	bestScore := 0
 	for i, id := range ids {
-		tracks, err := d.artistTop(ctx, id, limit)
+		tracks, err := d.artistTop(ctx, id, fetch)
 		if err != nil || len(tracks) == 0 {
 			continue
 		}
@@ -210,35 +220,72 @@ func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []
 			firstNonEmpty = tracks
 		}
 		if len(known) == 0 {
-			return tracks, nil // nothing to disambiguate against
+			return capTracks(tracks, limit), nil // nothing to disambiguate against
 		}
-		score := 0
-		for _, t := range tracks {
-			if t.Album != "" {
-				if _, ok := known[normAlbum(t.Album)]; ok {
-					score++
-				}
-			}
+		kept := keepKnownAlbums(tracks, known)
+		if len(kept) > len(best) {
+			best = kept
 		}
-		if score > bestScore {
-			bestScore, best = score, tracks
-		}
-		if i == 0 && score > 0 {
-			return tracks, nil // Deezer's top match already fits — skip the rest
+		if i == 0 && len(kept) > 0 {
+			return capTracks(kept, limit), nil // Deezer's top match already fits — skip the rest
 		}
 	}
-	if bestScore > 0 {
-		return best, nil
+	if len(best) > 0 {
+		return capTracks(best, limit), nil
 	}
-	return firstNonEmpty, nil // no overlap anywhere; best-effort = most relevant
+	return capTracks(firstNonEmpty, limit), nil // no overlap anywhere; best-effort = most relevant
+}
+
+// keepKnownAlbums returns the tracks whose album appears in the artist's known
+// discography, preserving Deezer's popularity order.
+func keepKnownAlbums(tracks []DeezerTrack, known map[string]struct{}) []DeezerTrack {
+	out := make([]DeezerTrack, 0, len(tracks))
+	for _, t := range tracks {
+		if t.Album == "" {
+			continue // no album to verify against — can't confirm it's this artist's
+		}
+		if _, ok := known[normAlbum(t.Album)]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func capTracks(tracks []DeezerTrack, limit int) []DeezerTrack {
+	if limit > 0 && len(tracks) > limit {
+		return tracks[:limit]
+	}
+	return tracks
 }
 
 // normAlbum normalizes an album title for loose overlap matching: lowercase,
-// drop a trailing "(...)"/"[...]" qualifier, keep only ASCII alphanumerics.
+// drop trailing "(...)"/"[...]" qualifiers such as "(Deluxe)" or "[Remastered]",
+// then keep only ASCII alphanumerics. Deliberately mirrors normTitle() in
+// web/app/src/pages/Artist.tsx so the server's filter and the client's
+// Album/EP/Single badge agree on what counts as a match.
 func normAlbum(s string) string {
-	s = strings.ToLower(s)
-	if i := strings.LastIndexAny(s, "(["); i > 0 {
-		s = s[:i]
+	s = strings.ToLower(strings.TrimSpace(s))
+	for {
+		t := strings.TrimRight(s, " ")
+		n := len(t)
+		if n == 0 {
+			break
+		}
+		open := byte(0)
+		switch t[n-1] {
+		case ')':
+			open = '('
+		case ']':
+			open = '['
+		}
+		if open == 0 {
+			break
+		}
+		i := strings.LastIndexByte(t, open)
+		if i <= 0 {
+			break
+		}
+		s = t[:i] // strictly shorter, so this loop always terminates
 	}
 	var b strings.Builder
 	for _, r := range s {
@@ -408,32 +455,60 @@ type MBReleaseGroup struct {
 	FirstRelease   string   `json:"firstRelease,omitempty"` // YYYY or YYYY-MM-DD
 }
 
-// ReleaseGroups returns an artist's discography (albums, EPs, singles).
-// One rate-limited call; cached by the caller for a week.
+// MusicBrainz caps a page at 100 results. Prolific artists (Imagine Dragons
+// have well over 100 release groups once singles are counted) were silently
+// truncated by the old single-page fetch, which both hid releases from the
+// discography and made top-track album matching fail for anything missing.
+const (
+	mbPageLimit = 100
+	mbMaxPages  = 4 // 400 release groups; bounds the worst case at ~4 rate-limited calls
+)
+
+// ReleaseGroups returns an artist's discography (albums, EPs, singles), paging
+// through MusicBrainz until the set is complete (or mbMaxPages is reached).
+// Cached by the caller for a week, so the extra calls are a cold-fetch cost
+// only. A mid-way error returns what has been collected rather than failing.
 func (m *MusicBrainz) ReleaseGroups(ctx context.Context, artistMBID string) ([]MBReleaseGroup, error) {
-	var resp struct {
-		ReleaseGroups []struct {
-			ID             string   `json:"id"`
-			Title          string   `json:"title"`
-			PrimaryType    string   `json:"primary-type"`
-			SecondaryTypes []string `json:"secondary-types"`
-			FirstRelease   string   `json:"first-release-date"`
-		} `json:"release-groups"`
-	}
-	u := mbBase() + "/ws/2/artist/" + url.PathEscape(artistMBID) +
-		"?inc=release-groups&type=album%7Cep%7Csingle&limit=100&fmt=json"
-	if err := getJSON(ctx, m.lim, u, map[string]string{"User-Agent": m.userAgent}, &resp); err != nil {
-		return nil, err
-	}
-	out := make([]MBReleaseGroup, 0, len(resp.ReleaseGroups))
-	for _, rg := range resp.ReleaseGroups {
-		if rg.PrimaryType == "" {
-			continue
+	var out []MBReleaseGroup
+	fetched := 0
+	for page := 0; page < mbMaxPages; page++ {
+		var resp struct {
+			Count         int `json:"release-group-count"`
+			ReleaseGroups []struct {
+				ID             string   `json:"id"`
+				Title          string   `json:"title"`
+				PrimaryType    string   `json:"primary-type"`
+				SecondaryTypes []string `json:"secondary-types"`
+				FirstRelease   string   `json:"first-release-date"`
+			} `json:"release-groups"`
 		}
-		out = append(out, MBReleaseGroup{
-			MBID: rg.ID, Title: rg.Title, PrimaryType: rg.PrimaryType,
-			SecondaryTypes: rg.SecondaryTypes, FirstRelease: rg.FirstRelease,
-		})
+		// The browse endpoint (unlike the artist lookup) reports the total count,
+		// so we only pay for extra pages when there are extra pages.
+		u := mbBase() + "/ws/2/release-group?artist=" + url.QueryEscape(artistMBID) +
+			"&type=album%7Cep%7Csingle&limit=" + fmtInt(mbPageLimit) +
+			"&offset=" + fmtInt(page*mbPageLimit) + "&fmt=json"
+		if err := getJSON(ctx, m.lim, u, map[string]string{"User-Agent": m.userAgent}, &resp); err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			break // partial discography beats none
+		}
+		if len(resp.ReleaseGroups) == 0 {
+			break
+		}
+		fetched += len(resp.ReleaseGroups)
+		for _, rg := range resp.ReleaseGroups {
+			if rg.PrimaryType == "" {
+				continue
+			}
+			out = append(out, MBReleaseGroup{
+				MBID: rg.ID, Title: rg.Title, PrimaryType: rg.PrimaryType,
+				SecondaryTypes: rg.SecondaryTypes, FirstRelease: rg.FirstRelease,
+			})
+		}
+		if len(resp.ReleaseGroups) < mbPageLimit || (resp.Count > 0 && fetched >= resp.Count) {
+			break
+		}
 	}
 	return out, nil
 }

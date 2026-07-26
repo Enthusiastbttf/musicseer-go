@@ -98,3 +98,110 @@ func TestDeezerTopPreviewsForFallback(t *testing.T) {
 		t.Fatalf("expected fallback to most-relevant match, got %+v", tracks)
 	}
 }
+
+// The reported bug: Deezer's top tracks for Imagine Dragons included "Bones",
+// filed under an album not in the artist's discography, which rendered with no
+// Album/EP/Single badge. Mismatched tracks must not be listed at all.
+func TestDeezerTopPreviewsForDropsMismatchedAlbums(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search/artist":
+			w.Write([]byte(`{"data":[{"id":7}]}`))
+		case "/artist/7/top":
+			w.Write([]byte(`{"data":[
+				{"title":"Demons","preview":"http://x/1.mp3","duration":175,"album":{"title":"Night Visions"}},
+				{"title":"Natural","preview":"http://x/2.mp3","duration":189,"album":{"title":"Origins (Deluxe)"}},
+				{"title":"Bones","preview":"http://x/3.mp3","duration":165,"album":{"title":"Bones"}},
+				{"title":"Whatever It Takes","preview":"http://x/4.mp3","duration":201,"album":{"title":"Evolve"}},
+				{"title":"No Album","preview":"http://x/5.mp3","duration":100,"album":{"title":""}}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	os.Setenv("MUSICSEER_DEEZER_BASE", srv.URL)
+	defer os.Unsetenv("MUSICSEER_DEEZER_BASE")
+
+	known := []string{"Night Visions", "Origins", "Evolve", "Mercury - Act 1"}
+	tracks, err := NewDeezer().TopPreviewsFor(context.Background(), "Imagine Dragons", known, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range tracks {
+		if tr.Title == "Bones" {
+			t.Fatalf("mismatched album track was listed: %+v", tracks)
+		}
+		if tr.Album == "" {
+			t.Fatalf("unverifiable track (no album) was listed: %+v", tracks)
+		}
+	}
+	if len(tracks) != 3 {
+		t.Fatalf("want the 3 discography-backed tracks, got %d: %+v", len(tracks), tracks)
+	}
+	// "Origins (Deluxe)" must still match the discography's "Origins".
+	if tracks[1].Title != "Natural" {
+		t.Fatalf("deluxe-suffixed album should still match: %+v", tracks)
+	}
+}
+
+// If the discography is present but nothing overlaps (thin or oddly-titled
+// MusicBrainz data), fall back to the unfiltered list rather than showing an
+// empty Top Tracks section.
+func TestDeezerTopPreviewsForNoOverlapKeepsList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search/artist":
+			w.Write([]byte(`{"data":[{"id":9}]}`))
+		case "/artist/9/top":
+			w.Write([]byte(`{"data":[{"title":"Some Song","preview":"http://x/s.mp3","duration":200,"album":{"title":"Unlisted Release"}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	os.Setenv("MUSICSEER_DEEZER_BASE", srv.URL)
+	defer os.Unsetenv("MUSICSEER_DEEZER_BASE")
+
+	tracks, err := NewDeezer().TopPreviewsFor(context.Background(), "Obscure Band", []string{"Something Else"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 1 || tracks[0].Title != "Some Song" {
+		t.Fatalf("expected unfiltered fallback, got %+v", tracks)
+	}
+}
+
+// The limit must be honoured after filtering, not before (we over-fetch so the
+// list stays full once mismatches are dropped).
+func TestDeezerTopPreviewsForRespectsLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search/artist":
+			w.Write([]byte(`{"data":[{"id":3}]}`))
+		case "/artist/3/top":
+			if got := r.URL.Query().Get("limit"); got != "20" {
+				t.Errorf("expected an over-fetch of 20, got limit=%s", got)
+			}
+			w.Write([]byte(`{"data":[
+				{"title":"A","preview":"http://x/a.mp3","album":{"title":"LP"}},
+				{"title":"B","preview":"http://x/b.mp3","album":{"title":"Nope"}},
+				{"title":"C","preview":"http://x/c.mp3","album":{"title":"LP"}},
+				{"title":"D","preview":"http://x/d.mp3","album":{"title":"LP"}}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	os.Setenv("MUSICSEER_DEEZER_BASE", srv.URL)
+	defer os.Unsetenv("MUSICSEER_DEEZER_BASE")
+
+	tracks, err := NewDeezer().TopPreviewsFor(context.Background(), "Band", []string{"LP"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 2 || tracks[0].Title != "A" || tracks[1].Title != "C" {
+		t.Fatalf("want the first 2 matching tracks (A, C), got %+v", tracks)
+	}
+}
