@@ -176,11 +176,27 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	// v2.13.5: the v3 purge matched the wrong placeholder shape. Deezer's real
+	// "no picture" URL fills the hash segment with the MD5 of the empty string
+	// rather than leaving it blank —
+	//   .../images/artist/d41d8cd98f00b204e9800998ecf8427e/1000x1000-...jpg
+	// — so it is syntactically indistinguishable from a real photo and those
+	// rows survived v3 still showing a silhouette. Same targeting rule as v3.
+	if userVersion < 4 {
+		if _, err := db.Exec(
+			`UPDATE artists SET image_url=NULL, image_checked_at=NULL
+			 WHERE image_url LIKE '%/d41d8cd98f00b204e9800998ecf8427e/%'`); err != nil {
+			return err
+		}
+		if _, err := db.Exec("PRAGMA user_version = 4"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // schemaVersion is the PRAGMA user_version a fully-migrated database carries.
-const schemaVersion = 3
+const schemaVersion = 4
 
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 

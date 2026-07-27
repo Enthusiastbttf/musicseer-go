@@ -255,8 +255,17 @@ func TestDeezerPlaceholderImage(t *testing.T) {
 		{"https://e-cdns-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg", true},
 		{"https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg", true},
 		{"http://e-cdns-images.dzcdn.net/images/artist//56x56-000000-80-0-0.jpg", true},
+		// The shape actually observed in production on Coldplay, Elton John
+		// and Eric Clapton under v2.13.4, copied from the running instance.
+		// v2.13.4 only tested the empty-segment form above and shipped a
+		// detector that could never match this one.
+		{"https://cdn-images.dzcdn.net/images/artist/d41d8cd98f00b204e9800998ecf8427e/1000x1000-000000-80-0-0.jpg", true},
+		{"https://e-cdns-images.dzcdn.net/images/artist/D41D8CD98F00B204E9800998ECF8427E/250x250-000000-80-0-0.jpg", true},
 		{"https://e-cdns-images.dzcdn.net/images/artist/1a2b3c/250x250-000000-80-0-0.jpg", false},
 		{"https://e-cdns-images.dzcdn.net/images/cover/abc/500x500.jpg", false},
+		// The hash must match as a whole path segment. A real photo whose hash
+		// merely embeds those characters is a genuine image, not a placeholder.
+		{"https://e-cdns-images.dzcdn.net/images/artist/ffd41d8cd98f00b204e9800998ecf8427eff/500x500.jpg", false},
 	}
 	for _, c := range cases {
 		if got := DeezerPlaceholderImage(c.url); got != c.placeholder {
@@ -278,6 +287,22 @@ func TestArtistImageRejectsDeezerPlaceholder(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("Deezer's silhouette must not count as a photo, got %q", got)
+	}
+}
+
+// The same rejection must hold for the empty-MD5 shape, which is the one the
+// running instance actually served. This is the regression v2.13.4 missed.
+func TestArtistImageRejectsEmptyMD5Placeholder(t *testing.T) {
+	artistImageServer(t, `{"data":[
+		{"id":1,"name":"Elton John","picture_xl":"https://cdn-images.dzcdn.net/images/artist/d41d8cd98f00b204e9800998ecf8427e/1000x1000-000000-80-0-0.jpg"}
+	]}`, nil)
+
+	got, err := NewDeezer().ArtistImageFor(context.Background(), "Elton John", []string{"Madman Across the Water"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("empty-MD5 silhouette must not count as a photo, got %q", got)
 	}
 }
 

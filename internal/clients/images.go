@@ -356,21 +356,28 @@ type deezerArtistHit struct {
 	PictureMd string `json:"picture_medium"`
 }
 
+// emptyMD5 is the MD5 of the empty string. Deezer's CDN path carries the
+// image's content hash, so an artist with no picture hashes to exactly this.
+const emptyMD5 = "d41d8cd98f00b204e9800998ecf8427e"
+
 // DeezerPlaceholderImage reports whether a Deezer image URL is its "no
 // picture" default rather than a real photo.
 //
 // Deezer does not return an empty string for an artist it has no image for.
-// It returns a normally-formed, perfectly loadable CDN URL with the image
-// hash segment simply missing:
+// It returns a normally-formed, perfectly loadable CDN URL that renders a grey
+// silhouette on white. There are two shapes, and v2.13.4 shipped a detector
+// for the wrong one:
 //
+//	https://cdn-images.dzcdn.net/images/artist/d41d8cd98f00b204e9800998ecf8427e/1000x1000-000000-80-0-0.jpg
 //	https://e-cdns-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg
-//	                                            ^^ no hash
 //
-// That renders as a grey silhouette on white, which looked like a real photo
-// to every caller here and pinned itself to artists that should have fallen
-// through to TheAudioDB. The empty path segment is the tell, so this checks
-// the path (after the scheme) for an empty component rather than matching a
-// hostname or size that Deezer is free to change.
+// The second has an empty hash segment. The first — the one actually observed
+// on Coldplay, Elton John and Eric Clapton — fills that segment with the MD5
+// of the empty string, so it is syntactically indistinguishable from a real
+// URL and the empty-segment test never fired. Both are checked here.
+//
+// This matters beyond cosmetics: a silhouette masquerades as a resolved photo,
+// so the row is never revisited and TheAudioDB is never tried.
 func DeezerPlaceholderImage(u string) bool {
 	if u == "" {
 		return true
@@ -378,7 +385,17 @@ func DeezerPlaceholderImage(u string) bool {
 	if i := strings.Index(u, "://"); i >= 0 {
 		u = u[i+3:]
 	}
-	return strings.Contains(u, "//")
+	if strings.Contains(u, "//") {
+		return true
+	}
+	// Match the hash as a whole path segment, so a real image whose URL merely
+	// contains those characters somewhere is not discarded.
+	for _, seg := range strings.Split(u, "/") {
+		if strings.EqualFold(seg, emptyMD5) {
+			return true
+		}
+	}
+	return false
 }
 
 // picture returns the largest real image, or "" when Deezer has none. A

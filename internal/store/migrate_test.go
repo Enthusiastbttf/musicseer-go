@@ -162,6 +162,12 @@ func TestDeezerPlaceholderPhotoPurge(t *testing.T) {
 	if err := s.SetArtistImage("Coldplay", placeholder); err != nil {
 		t.Fatal(err)
 	}
+	// v2.13.5: the shape the running instance actually held. The v3 purge
+	// above cannot match it — there is no empty path segment.
+	const emptyHash = "https://cdn-images.dzcdn.net/images/artist/d41d8cd98f00b204e9800998ecf8427e/1000x1000-000000-80-0-0.jpg"
+	if err := s.SetArtistImage("Elton John", emptyHash); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SetArtistImage("RED", "https://e-cdns-images.dzcdn.net/images/artist/real/500x500.jpg"); err != nil {
 		t.Fatal(err)
 	}
@@ -177,12 +183,29 @@ func TestDeezerPlaceholderPhotoPurge(t *testing.T) {
 	}
 	defer s2.DB.Close()
 
-	var url, checked any
-	if err := s2.DB.QueryRow("SELECT image_url, image_checked_at FROM artists WHERE name='Coldplay'").Scan(&url, &checked); err != nil {
-		t.Fatal(err)
-	}
-	if url != nil || checked != nil {
-		t.Fatalf("silhouette row should be cleared, got url=%v checked=%v", url, checked)
+	for _, name := range []string{"Coldplay", "Elton John"} {
+		var url, checked any
+		if err := s2.DB.QueryRow("SELECT image_url, image_checked_at FROM artists WHERE name=?", name).Scan(&url, &checked); err != nil {
+			t.Fatal(err)
+		}
+		if url != nil || checked != nil {
+			t.Fatalf("%s silhouette row should be cleared, got url=%v checked=%v", name, url, checked)
+		}
+		// Clearing image_url alone would leave the row invisible to the
+		// backfill, turning a silhouette into a permanent blank.
+		missing, err := s2.ArtistsMissingImages(10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, a := range missing {
+			if a.Name == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s must be eligible for re-fetch after the purge", name)
+		}
 	}
 
 	// A real photo alongside it must survive: this purge is targeted.
