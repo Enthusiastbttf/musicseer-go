@@ -20,10 +20,10 @@ var curatedGenres = []string{
 // handleGenres returns the personal "genres to explore" pills (from the
 // library's MusicBrainz tags, shuffled for variety) plus the curated browse
 // list. Pure SQLite — no external calls.
-func (s *Server) handleGenres(w http.ResponseWriter, _ *http.Request, _ *store.User) {
+func (s *Server) handleGenres(w http.ResponseWriter, r *http.Request, _ *store.User) {
 	libGenres, err := s.st.LibraryGenres(24)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "genres", err)
 		return
 	}
 	// Shuffle so the pills rotate between visits, like the old app.

@@ -12,10 +12,10 @@ import (
 
 // ---------- users ----------
 
-func (s *Server) handleUsersList(w http.ResponseWriter, _ *http.Request, _ *store.User) {
+func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request, _ *store.User) {
 	users, err := s.st.Users()
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "users list", err)
 		return
 	}
 	jsonWrite(w, http.StatusOK, users)
@@ -44,7 +44,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request, _ *sto
 		}
 		h, err := bcrypt.GenerateFromPassword([]byte(body.Password), 12)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			s.serverError(w, r, "user create", err)
 			return
 		}
 		hash = string(h)
@@ -90,14 +90,14 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, admin 
 		}
 		h, err := bcrypt.GenerateFromPassword([]byte(*body.Password), 12)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			s.serverError(w, r, "user update", err)
 			return
 		}
 		hs := string(h)
 		hash = &hs
 	}
 	if err := s.st.UpdateUser(id, body.Role, body.CanAutoApprove, hash, body.LastfmUser); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "user update", err)
 		return
 	}
 	if body.LastfmUser != nil {
@@ -119,7 +119,7 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, admin 
 		return
 	}
 	if err := s.st.DeleteUser(id); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "user delete", err)
 		return
 	}
 	jsonWrite(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -140,10 +140,10 @@ type instanceBody struct {
 	RootFolder        string `json:"rootFolder"`
 }
 
-func (s *Server) handleInstancesList(w http.ResponseWriter, _ *http.Request, _ *store.User) {
+func (s *Server) handleInstancesList(w http.ResponseWriter, r *http.Request, _ *store.User) {
 	instances, err := s.st.Instances("")
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "instances list", err)
 		return
 	}
 	if instances == nil {
@@ -166,7 +166,7 @@ func (s *Server) handleInstanceCreate(w http.ResponseWriter, r *http.Request, _ 
 	}
 	enc, err := s.box.Encrypt(body.APIKey)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "instance create", err)
 		return
 	}
 	active := true
@@ -214,7 +214,7 @@ func (s *Server) handleInstanceUpdate(w http.ResponseWriter, r *http.Request, _ 
 	if body.APIKey != "" { // only rotate the key when a new one is supplied
 		enc, err := s.box.Encrypt(body.APIKey)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			s.serverError(w, r, "instance update", err)
 			return
 		}
 		existing.APIKeyEnc = enc
@@ -227,7 +227,7 @@ func (s *Server) handleInstanceUpdate(w http.ResponseWriter, r *http.Request, _ 
 	existing.MetadataProfileID = body.MetadataProfileID
 	existing.RootFolder = body.RootFolder
 	if err := s.st.UpdateInstance(existing); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "instance update", err)
 		return
 	}
 	jsonWrite(w, http.StatusOK, existing)
@@ -240,7 +240,7 @@ func (s *Server) handleInstanceDelete(w http.ResponseWriter, r *http.Request, _ 
 		return
 	}
 	if err := s.st.DeleteInstance(id); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "instance delete", err)
 		return
 	}
 	jsonWrite(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -349,7 +349,7 @@ func (s *Server) handleLastfmSet(w http.ResponseWriter, r *http.Request, u *stor
 		}
 		enc, err := s.box.Encrypt(body.APIKey)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			s.serverError(w, r, "lastfm set", err)
 			return
 		}
 		s.st.SetSetting("lastfm_api_key", enc)

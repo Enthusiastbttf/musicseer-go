@@ -24,7 +24,7 @@ func (s *Server) handleTrending(w http.ResponseWriter, r *http.Request, _ *store
 	limit := queryLimit(r, 50, 100)
 	trending, _, err := s.st.Trending("global", limit)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "trending", err)
 		return
 	}
 	names := make([]string, len(trending))
@@ -33,7 +33,7 @@ func (s *Server) handleTrending(w http.ResponseWriter, r *http.Request, _ *store
 	}
 	meta, err := s.st.ArtistsByNames(names)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "trending", err)
 		return
 	}
 	type entry struct {

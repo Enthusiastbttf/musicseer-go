@@ -15,7 +15,7 @@ func (s *Server) handleRequestsList(w http.ResponseWriter, r *http.Request, u *s
 	all := r.URL.Query().Get("all") == "1" && u.Role == "admin"
 	reqs, err := s.st.RequestsList(u.ID, all)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "requests list", err)
 		return
 	}
 	if reqs == nil {
@@ -51,7 +51,7 @@ func (s *Server) handleRequestCreate(w http.ResponseWriter, r *http.Request, u *
 			jsonError(w, http.StatusConflict, "you already have an open request for this artist")
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "request create", err)
 		return
 	}
 
@@ -71,7 +71,7 @@ func (s *Server) handleRequestApprove(w http.ResponseWriter, r *http.Request, _ 
 		return
 	}
 	if err := s.st.UpdateRequestStatus(id, "approved", "", "", 0); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "request approve", err)
 		return
 	}
 	go s.pushToLidarr(id)
@@ -90,7 +90,7 @@ func (s *Server) handleRequestReject(w http.ResponseWriter, r *http.Request, _ *
 	}
 	decodeBody(r, &body) // notes optional
 	if err := s.st.UpdateRequestStatus(id, "rejected", body.Notes, "", 0); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "request reject", err)
 		return
 	}
 	req, _ := s.st.RequestByID(id)
@@ -104,7 +104,7 @@ func (s *Server) handleRequestRetry(w http.ResponseWriter, r *http.Request, _ *s
 		return
 	}
 	if err := s.st.UpdateRequestStatus(id, "approved", "", "", 0); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "request retry", err)
 		return
 	}
 	go s.pushToLidarr(id)
@@ -128,7 +128,7 @@ func (s *Server) handleRequestDelete(w http.ResponseWriter, r *http.Request, u *
 		return
 	}
 	if err := s.st.DeleteRequest(id); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "request delete", err)
 		return
 	}
 	jsonWrite(w, http.StatusOK, map[string]string{"status": "deleted"})

@@ -169,14 +169,24 @@ func (e *Engine) SyncTrending(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		var imgErrs int
+		var lastImgErr error
 		for _, a := range top {
 			chart = append(chart, chartEntry{a.Name, "", 0, 0})
 			// Skip Deezer's grey-silhouette default: storing it would look
 			// like a resolved photo and stop the image worker from ever
 			// trying TheAudioDB for this artist.
 			if !clients.DeezerPlaceholderImage(a.Picture) {
-				e.st.SetArtistImage(a.Name, a.Picture)
+				if err := e.st.SetArtistImage(a.Name, a.Picture); err != nil {
+					imgErrs++
+					lastImgErr = err
+				}
 			}
+		}
+		// Counted rather than logged per artist: this loop runs over the whole
+		// chart, so a broken database would otherwise emit hundreds of lines.
+		if imgErrs > 0 {
+			e.log.Warn("storing chart artist images failed", "failed", imgErrs, "of", len(top), "err", lastImgErr)
 		}
 	}
 	if len(chart) == 0 {
@@ -184,10 +194,18 @@ func (e *Engine) SyncTrending(ctx context.Context) error {
 	}
 
 	trending := make([]store.TrendingArtist, 0, len(chart))
+	var upsertErrs int
+	var lastUpsertErr error
 	for i, a := range chart {
 		trending = append(trending, store.TrendingArtist{Rank: i + 1, Name: a.name, MBID: a.mbid})
-		e.st.UpsertArtist(&store.Artist{Name: a.name, MBID: a.mbid, Listeners: a.listeners, Playcount: a.playcount})
+		if err := e.st.UpsertArtist(&store.Artist{Name: a.name, MBID: a.mbid, Listeners: a.listeners, Playcount: a.playcount}); err != nil {
+			upsertErrs++
+			lastUpsertErr = err
+		}
 		e.enqueueImage(a.name, a.mbid)
+	}
+	if upsertErrs > 0 {
+		e.log.Warn("upserting chart artists failed", "failed", upsertErrs, "of", len(chart), "err", lastUpsertErr)
 	}
 	if err := e.st.ReplaceTrending("global", trending); err != nil {
 		return err
@@ -404,7 +422,9 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 	if len(seeds) == 0 {
 		// Nothing in the library yet: store an empty list so the UI can fall
 		// back to trending without a "computing…" state.
-		e.st.SaveRecommendations(userID, "similar", []Recommendation{})
+		if err := e.st.SaveRecommendations(userID, "similar", []Recommendation{}); err != nil {
+			e.log.Warn("save empty recommendations", "user", userID, "reason", "no seeds", "err", err)
+		}
 		return nil
 	}
 
@@ -459,7 +479,9 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 		}
 	}
 	if len(candidates) == 0 {
-		e.st.SaveRecommendations(userID, "similar", []Recommendation{})
+		if err := e.st.SaveRecommendations(userID, "similar", []Recommendation{}); err != nil {
+			e.log.Warn("save empty recommendations", "user", userID, "reason", "no candidates", "err", err)
+		}
 		return nil
 	}
 
@@ -505,7 +527,15 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 			enriched++
 		}
 		if enriched > 0 {
-			meta, _ = e.st.ArtistsByNames(names)
+			// A failure here is not fatal — the pre-enrichment meta is still
+			// usable — but silently reusing stale rows is exactly the kind of
+			// thing that made the artwork bugs hard to see.
+			refreshed, err := e.st.ArtistsByNames(names)
+			if err != nil {
+				e.log.Warn("re-read enriched artist metadata", "user", userID, "artists", enriched, "err", err)
+			} else {
+				meta = refreshed
+			}
 			e.log.Info("candidate popularity enriched", "user", userID, "artists", enriched)
 		}
 	}
@@ -605,7 +635,10 @@ func (e *Engine) similarFor(ctx context.Context, name, mbid string) []store.Simi
 			mbid, _ = e.MB.SearchArtistMBID(ctx, name)
 		}
 		if mbid == "" {
-			e.st.SaveSimilar(name, []store.SimilarArtist{}) // do not retry every run
+			// Cache the empty result so this artist is not retried every run.
+			if err := e.st.SaveSimilar(name, []store.SimilarArtist{}); err != nil {
+				e.log.Warn("cache empty similar list", "artist", name, "err", err)
+			}
 			return nil
 		}
 		similar, err := e.LB.SimilarArtists(ctx, mbid, 50)
@@ -622,7 +655,9 @@ func (e *Engine) similarFor(ctx context.Context, name, mbid string) []store.Simi
 		}
 		return nil
 	}
-	e.st.SaveSimilar(name, out)
+	if err := e.st.SaveSimilar(name, out); err != nil {
+		e.log.Warn("cache similar list", "artist", name, "count", len(out), "err", err)
+	}
 	return out
 }
 
@@ -714,10 +749,15 @@ func (e *Engine) imageWorker(ctx context.Context) {
 			// pick a different artist with the same name.
 			url, _ = e.AudioDB.ArtistImage(ctx, job.name, job.mbid)
 		}
+		// Low volume (50 per 10 min) and this is the path every artwork bug so
+		// far has run through, so a per-artist warn is worth the log lines: a
+		// write that silently fails here looks identical to "no image found".
 		if url != "" {
-			e.st.SetArtistImage(job.name, url)
-		} else {
-			e.st.MarkImageChecked(job.name)
+			if err := e.st.SetArtistImage(job.name, url); err != nil {
+				e.log.Warn("store artist image", "artist", job.name, "err", err)
+			}
+		} else if err := e.st.MarkImageChecked(job.name); err != nil {
+			e.log.Warn("mark artist image checked", "artist", job.name, "err", err)
 		}
 	}
 }

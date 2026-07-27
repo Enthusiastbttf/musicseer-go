@@ -269,6 +269,36 @@ func (s *Store) CreateUser(username, email, hash, role string, autoApprove bool)
 	return res.LastInsertId()
 }
 
+// ErrSetupComplete is returned by CreateFirstAdmin when an account already
+// exists, so first-run setup is no longer open.
+var ErrSetupComplete = errors.New("setup already completed")
+
+// CreateFirstAdmin creates the initial admin account, but only while the
+// instance has no users at all.
+//
+// The guard and the insert are one statement on purpose. Doing the count in Go
+// and the insert afterwards leaves a window in which two concurrent requests
+// both see zero users and both become admin — narrow, and only during the
+// unconfigured window before anyone has claimed the instance, but that window
+// is exactly when the box is reachable and unowned. INSERT ... SELECT ... WHERE
+// NOT EXISTS closes it without a transaction: SQLite evaluates the subquery as
+// part of the write. Zero rows affected means someone else got there first.
+func (s *Store) CreateFirstAdmin(username, email, hash string) (int64, error) {
+	res, err := s.DB.Exec(
+		`INSERT INTO users (username, email, password_hash, role, can_auto_approve)
+		 SELECT ?,?,?,'admin',1 WHERE NOT EXISTS (SELECT 1 FROM users)`,
+		username, nullIfEmpty(email), nullIfEmpty(hash))
+	if err != nil {
+		return 0, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return 0, err
+	} else if n == 0 {
+		return 0, ErrSetupComplete
+	}
+	return res.LastInsertId()
+}
+
 func (s *Store) UpdateUser(id int64, role *string, autoApprove *bool, hash *string, lastfmUser *string) error {
 	sets, args := []string{"updated_at=?"}, []any{now()}
 	if role != nil {
@@ -627,8 +657,13 @@ func (s *Store) ArtistsMissingImages(limit int) ([]Artist, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) MarkImageChecked(name string) {
-	s.DB.Exec("UPDATE artists SET image_checked_at=? WHERE name=?", now(), name)
+// MarkImageChecked records that a lookup ran and found nothing, so the backfill
+// worker moves on instead of retrying the same artist forever. It returns its
+// error: swallowing it here is what turns a broken write into an artist that is
+// re-queued every cycle with no trace in the log.
+func (s *Store) MarkImageChecked(name string) error {
+	_, err := s.DB.Exec("UPDATE artists SET image_checked_at=? WHERE name=?", now(), name)
+	return err
 }
 
 func (s *Store) ArtistCount() (int, error) {

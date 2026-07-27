@@ -15,7 +15,18 @@ EnvironmentFile=-/etc/musicseer/musicseer.env
 Restart=on-failure
 RestartSec=5
 
-# Hardening
+# Hardening.
+#
+# This block is the single source of truth: deploy/proxmox-create-lxc.sh writes
+# a byte-identical unit, and TestLXCUnitMatchesReference fails the build if the
+# two drift apart. Edit here, then copy into the heredoc in that script.
+#
+# NOTE: this text is embedded in a single-quoted shell string in that script,
+# so it must stay free of apostrophes.
+#
+# Inside an unprivileged LXC systemd silently skips the directives it cannot
+# apply rather than refusing to start, so these are safe in a container — but
+# check `systemctl status musicseer` after a fresh provision anyway.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -26,8 +37,16 @@ ProtectHome=true
 ReadWritePaths=/var/lib/musicseer /opt/musicseer
 PrivateTmp=true
 ProtectKernelTunables=true
+ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+# A Go HTTP service needs nothing outside the normal service set. Not
+# MemoryDenyWriteExecute — the Go runtime maps its own executable pages.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

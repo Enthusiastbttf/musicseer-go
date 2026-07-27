@@ -125,12 +125,42 @@ func (s *Server) Handler() http.Handler {
 
 // ---------- middleware ----------
 
+// contentSecurityPolicy is tuned to what the SPA actually does. Vite bundles
+// every script and stylesheet into the embedded dist, so nothing is loaded
+// off-origin and script-src can be flatly 'self' with no nonce machinery —
+// that clause is the one doing the real work.
+//
+//   - style-src allows 'unsafe-inline' because a bundler or a library can still
+//     inject a <style> at runtime. Inline styles are a far weaker vector than
+//     inline script, and locking this down risks a blank page that is painful
+//     to debug on a headless box.
+//   - img-src and media-src allow any https origin: artwork and 30s previews
+//     come from Deezer, TheAudioDB, Cover Art Archive and Last.fm, whose CDN
+//     hostnames change without notice. An allowlist here would break artwork
+//     for no meaningful gain once script-src is closed.
+//   - No HSTS. This process does not terminate TLS; it is reached over plain
+//     HTTP on the LAN and over HTTPS through Nginx Proxy Manager. Emitting HSTS
+//     from here — off a spoofable X-Forwarded-Proto — would pin browsers to
+//     https://10.0.10.253:8688, which does not exist. Set it at NPM instead.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: https:; " +
+	"media-src 'self' https:; " +
+	"connect-src 'self'; " +
+	"font-src 'self' data:; " +
+	"object-src 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'; " +
+	"frame-ancestors 'none'"
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -180,6 +210,20 @@ func jsonWrite(w http.ResponseWriter, status int, v any) {
 
 func jsonError(w http.ResponseWriter, status int, msg string) {
 	jsonWrite(w, status, map[string]string{"error": msg})
+}
+
+// serverError reports an internal failure without handing its text to the
+// client. SQLite errors name columns and file paths, and decrypt failures
+// describe the key state; neither is anything a caller can act on, and once
+// family members have logins they are no longer all trusted operators.
+//
+// This is deliberately NOT applied to upstream (502) errors or the admin-only
+// diagnostics in admin.go and update.go: "Lidarr said HTTP 401" is the whole
+// point of those messages, and the URL/key redaction that makes them safe to
+// surface already lives in clients.sanitizeURL.
+func (s *Server) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	s.log.Error(what, "err", err, "path", r.URL.Path)
+	jsonError(w, http.StatusInternalServerError, "internal error")
 }
 
 func decodeBody(r *http.Request, v any) error {

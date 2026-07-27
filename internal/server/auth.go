@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +17,7 @@ import (
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	count, err := s.st.UserCount()
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "status", err)
 		return
 	}
 	resp := map[string]any{"setupComplete": count > 0, "version": Version, "plexLogin": s.plexEnabled()}
@@ -31,7 +32,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	count, err := s.st.UserCount()
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "setup", err)
 		return
 	}
 	if count > 0 {
@@ -54,18 +55,32 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), 12)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		s.serverError(w, r, "setup", err)
 		return
 	}
-	id, err := s.st.CreateUser(body.Username, body.Email, string(hash), "admin", true)
+	// Atomic: the count check above is a friendly early exit, this is the one
+	// that actually decides. See store.CreateFirstAdmin.
+	id, err := s.st.CreateFirstAdmin(body.Username, body.Email, string(hash))
+	if errors.Is(err, store.ErrSetupComplete) {
+		jsonError(w, http.StatusForbidden, "setup already completed")
+		return
+	}
 	if err != nil {
-		jsonError(w, http.StatusConflict, err.Error())
+		// Unauthenticated endpoint — never echo the SQLite text here.
+		s.serverError(w, r, "first-run setup", err)
 		return
 	}
 	s.startSession(w, r, id)
 	u, _ := s.st.UserByID(id)
 	jsonWrite(w, http.StatusCreated, map[string]any{"user": u})
 }
+
+// dummyHash is a valid cost-12 bcrypt hash of a passphrase nobody can supply.
+// It exists only to give the "no such user" path the same cost as a real
+// verification; it is never a credential. Cost 12 must match the cost used in
+// handleSetup / handleUserCreate or the timing still differs — TestDummyHash
+// asserts that, so a future cost bump can't silently reopen the oracle.
+const dummyHash = "$2a$12$m3fH2QYv5Yvv0AZ3X6pkLO45GYzk8vAERpVSS93XaErgRsknaGlge"
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
@@ -86,6 +101,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	authenticated := false
 	if err == nil && user.PasswordHash != "" {
 		authenticated = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)) == nil
+	} else {
+		// Burn the same ~250ms of bcrypt on a miss. The response body is
+		// already identical either way, but without this an unknown username
+		// returns an order of magnitude faster than a known one with a wrong
+		// password, which is a usable oracle for enumerating accounts.
+		bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(body.Password))
 	}
 
 	// Navidrome fallback: users who exist here without a local password can
