@@ -115,12 +115,11 @@ func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit 
 	if err := getJSON(ctx, d.lim, deezerBase()+"/search/album?limit=5&q="+url.QueryEscape(q), nil, &search); err != nil {
 		return nil, err
 	}
-	wantArtist, wantAlbum := normAlbum(artist), normAlbum(album)
 	var id int64
 	for _, c := range search.Data {
 		// normAlbum strips trailing "(Deluxe Edition)"-style qualifiers, so a
 		// Deezer deluxe still matches MusicBrainz's standard-edition title.
-		if normAlbum(c.Artist.Name) == wantArtist && normAlbum(c.Title) == wantAlbum {
+		if sameName(c.Artist.Name, artist) && sameName(c.Title, album) {
 			id = c.ID
 			break
 		}
@@ -156,24 +155,6 @@ type DeezerTrack struct {
 	Album    string `json:"album,omitempty"`
 }
 
-// searchArtistIDs returns up to `limit` Deezer artist IDs for a name query,
-// in Deezer's relevance order (most popular first).
-func (d *Deezer) searchArtistIDs(ctx context.Context, name string, limit int) ([]int64, error) {
-	var search struct {
-		Data []struct {
-			ID int64 `json:"id"`
-		} `json:"data"`
-	}
-	if err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit="+fmtInt(limit)+"&q="+url.QueryEscape(name), nil, &search); err != nil {
-		return nil, err
-	}
-	ids := make([]int64, 0, len(search.Data))
-	for _, a := range search.Data {
-		ids = append(ids, a.ID)
-	}
-	return ids, nil
-}
-
 // artistTop fetches one Deezer artist's top tracks with the album each appears
 // on, dropping tracks that have no playable preview.
 func (d *Deezer) artistTop(ctx context.Context, id int64, limit int) ([]DeezerTrack, error) {
@@ -203,15 +184,20 @@ func (d *Deezer) artistTop(ctx context.Context, id int64, limit int) ([]DeezerTr
 // TopPreviews returns the most-relevant same-named Deezer artist's top tracks.
 // Use TopPreviewsFor when a discography is available to disambiguate.
 func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]DeezerTrack, error) {
-	ids, err := d.searchArtistIDs(ctx, name, 1)
-	if err != nil || len(ids) == 0 {
+	hits, err := d.searchArtists(ctx, name, deezerCandidates)
+	if err != nil {
 		return nil, err
 	}
-	return d.artistTop(ctx, ids[0], limit)
+	for _, h := range hits {
+		if sameName(h.Name, name) {
+			return d.artistTop(ctx, h.ID, limit)
+		}
+	}
+	return nil, nil
 }
 
-// TopPreviewsFor picks, among same-named Deezer artists, the one whose top
-// tracks' albums best overlap knownAlbums (the artist's MusicBrainz
+// TopPreviewsFor picks, among Deezer artists actually named `name`, the one
+// whose top tracks' albums overlap knownAlbums (the artist's MusicBrainz
 // discography), and returns ONLY that artist's tracks whose album is in the
 // discography. This does two jobs: it stops Deezer's name-only lookup from
 // returning a different band that shares the name (e.g. the 1980s metal
@@ -219,14 +205,33 @@ func (d *Deezer) TopPreviews(ctx context.Context, name string, limit int) ([]Dee
 // compilation appearances, or another artist's release that Deezer filed under
 // this name — that don't belong to this artist at all.
 //
-// Falls back to the most-relevant unfiltered match when no discography is
-// supplied or nothing overlaps anywhere, so a thin/missing MusicBrainz
-// discography degrades to the old behaviour instead of an empty section.
+// Fails closed. Earlier versions ended with "no overlap anywhere, so return
+// the most relevant match anyway", which defeated the whole filter in exactly
+// the case it existed for: a search for "Red" selected an unrelated artist
+// named 肯定 and published its single track as RED's top tracks. When a
+// discography is available and nothing corroborates any candidate, the honest
+// answer is no tracks — the section simply doesn't render.
+//
+// The unfiltered path survives only where there is genuinely nothing to check
+// against: no discography supplied at all.
 func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []string, limit int) ([]DeezerTrack, error) {
-	ids, err := d.searchArtistIDs(ctx, name, 5)
-	if err != nil || len(ids) == 0 {
+	hits, err := d.searchArtists(ctx, name, deezerCandidates)
+	if err != nil || len(hits) == 0 {
 		return nil, err
 	}
+	// Deezer ranks by popularity, not string match, and the old ID-only search
+	// threw the names away before anyone could look at them — which is how an
+	// artist not even called "Red" won the slot.
+	var named []deezerArtistHit
+	for _, h := range hits {
+		if sameName(h.Name, name) {
+			named = append(named, h)
+		}
+	}
+	if len(named) == 0 {
+		return nil, nil
+	}
+
 	known := make(map[string]struct{}, len(knownAlbums))
 	for _, a := range knownAlbums {
 		if k := normAlbum(a); k != "" {
@@ -239,14 +244,11 @@ func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []
 		fetch = 20
 	}
 
-	var firstNonEmpty, best []DeezerTrack
-	for i, id := range ids {
-		tracks, err := d.artistTop(ctx, id, fetch)
+	var best []DeezerTrack
+	for i, h := range named {
+		tracks, err := d.artistTop(ctx, h.ID, fetch)
 		if err != nil || len(tracks) == 0 {
 			continue
-		}
-		if firstNonEmpty == nil {
-			firstNonEmpty = tracks
 		}
 		if len(known) == 0 {
 			return capTracks(tracks, limit), nil // nothing to disambiguate against
@@ -259,10 +261,7 @@ func (d *Deezer) TopPreviewsFor(ctx context.Context, name string, knownAlbums []
 			return capTracks(kept, limit), nil // Deezer's top match already fits — skip the rest
 		}
 	}
-	if len(best) > 0 {
-		return capTracks(best, limit), nil
-	}
-	return capTracks(firstNonEmpty, limit), nil // no overlap anywhere; best-effort = most relevant
+	return capTracks(best, limit), nil // nil when nothing corroborated
 }
 
 // keepKnownAlbums returns the tracks whose album appears in the artist's known
@@ -323,6 +322,28 @@ func normAlbum(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// deezerCandidates is how many /search/artist hits to consider before giving
+// up. Deezer orders by popularity, so a small band sharing its name with a
+// big one can sit well down the list; 10 is deep enough to find it without
+// turning the name check into a crawl.
+const deezerCandidates = 10
+
+// sameName reports whether two artist names are the same name, ignoring case,
+// spacing and punctuation.
+//
+// normAlbum keeps only ASCII alphanumerics, so every non-Latin name — 肯定,
+// БИ-2, サカナクション — normalizes to the empty string and would otherwise
+// compare equal to every other one, and to any name made entirely of
+// punctuation. When normalization erases both sides, fall back to a direct
+// case-insensitive comparison so distinct non-Latin names stay distinct.
+func sameName(a, b string) bool {
+	na, nb := normAlbum(a), normAlbum(b)
+	if na != "" || nb != "" {
+		return na == nb
+	}
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 // deezerArtistHit is one /search/artist result, with the picture sizes we
@@ -399,15 +420,14 @@ func (d *Deezer) ArtistImage(ctx context.Context, name string) (string, error) {
 // wrong artist, and a missing photo degrades to a placeholder while a wrong
 // one silently misinforms.
 func (d *Deezer) ArtistImageFor(ctx context.Context, name string, knownAlbums []string) (string, error) {
-	hits, err := d.searchArtists(ctx, name, 5)
+	hits, err := d.searchArtists(ctx, name, deezerCandidates)
 	if err != nil || len(hits) == 0 {
 		return "", err
 	}
 
-	wantName := normAlbum(name) // same normalizer: lowercase, alphanumerics only
 	var exact []deezerArtistHit
 	for _, h := range hits {
-		if normAlbum(h.Name) == wantName && h.picture() != "" {
+		if sameName(h.Name, name) && h.picture() != "" {
 			exact = append(exact, h)
 		}
 	}

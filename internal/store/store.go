@@ -127,7 +127,8 @@ func migrate(db *sql.DB) error {
 	}
 
 	// One-shot cache purges, gated on PRAGMA user_version so they run once per
-	// upgrade instead of on every restart.
+	// upgrade instead of on every restart. Bump schemaVersion whenever a new
+	// step is added below.
 	var userVersion int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
 		return err
@@ -143,8 +144,28 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	// v2.13.3: photos resolved before v2.13.2 came from an unverified Deezer
+	// name search, so an artist could be wearing a different band's face — RED
+	// showed a photo of an unrelated artist named 肯定. The backfill only
+	// visits artists with no image at all, so a wrong-but-present URL would
+	// never be revisited. Clear both columns: image_checked_at is what makes a
+	// row eligible again, and leaving it set would silently skip the re-fetch.
+	// Cleared rows show the placeholder until the worker gets to them
+	// (50 artists / 10 min), which is the correct interim state — a blank is
+	// honest, a wrong face is not.
+	if userVersion < 2 {
+		if _, err := db.Exec("UPDATE artists SET image_url=NULL, image_checked_at=NULL"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
+// schemaVersion is the PRAGMA user_version a fully-migrated database carries.
+const schemaVersion = 2
 
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 

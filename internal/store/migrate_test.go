@@ -16,8 +16,8 @@ func TestArtistDetailPurgeRunsOnce(t *testing.T) {
 	if err := s.DB.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 1 {
-		t.Fatalf("want user_version 1 after migrate, got %d", v)
+	if v != schemaVersion {
+		t.Fatalf("want user_version %d after migrate, got %d", schemaVersion, v)
 	}
 
 	// Simulate a truncated cache entry written by the new version, then reopen:
@@ -69,5 +69,82 @@ func TestArtistDetailPurgeOnUpgrade(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("stale truncated discography should have been purged, got %d rows", n)
+	}
+}
+
+// v2.13.3: photos resolved before v2.13.2 came from an unverified Deezer name
+// search, so a row could hold a different band's face. The backfill only
+// selects artists with no image AND no check timestamp, so both columns have
+// to be cleared — clearing image_url alone would leave the row permanently
+// ineligible, turning a wrong photo into a permanent blank.
+func TestArtistImagePurgeOnUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetArtistImage("Red", "http://deezer/wrong-band.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	// Look like a pre-2.13.3 database that has already taken the v1 purge.
+	if _, err := s.DB.Exec("PRAGMA user_version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Close()
+
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.DB.Close()
+
+	var url, checked any
+	if err := s2.DB.QueryRow("SELECT image_url, image_checked_at FROM artists WHERE name='Red'").Scan(&url, &checked); err != nil {
+		t.Fatal(err)
+	}
+	if url != nil || checked != nil {
+		t.Fatalf("stale photo should be cleared for re-fetch, got url=%v checked=%v", url, checked)
+	}
+
+	// The row must now be visible to the backfill worker again.
+	missing, err := s2.ArtistsMissingImages(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, a := range missing {
+		if a.Name == "Red" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("purged artist must be eligible for re-fetch, got %+v", missing)
+	}
+}
+
+// The image purge must not re-run on every restart, or every artist photo
+// would be dropped and re-fetched forever.
+func TestArtistImagePurgeRunsOnce(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetArtistImage("Red", "http://verified/red.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Close()
+
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.DB.Close()
+	var url string
+	if err := s2.DB.QueryRow("SELECT COALESCE(image_url,'') FROM artists WHERE name='Red'").Scan(&url); err != nil {
+		t.Fatal(err)
+	}
+	if url != "http://verified/red.jpg" {
+		t.Fatalf("a photo written after the purge must survive a restart, got %q", url)
 	}
 }

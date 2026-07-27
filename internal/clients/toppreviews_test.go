@@ -14,7 +14,7 @@ func TestDeezerTopPreviewsAlbum(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/artist":
-			w.Write([]byte(`{"data":[{"id":42}]}`))
+			w.Write([]byte(`{"data":[{"id":42,"name":"Evanescence"}]}`))
 		case "/artist/42/top":
 			w.Write([]byte(`{"data":[
 				{"title":"Bring Me to Life","preview":"http://x/bmtl.mp3","duration":237,"album":{"title":"Fallen"}},
@@ -50,7 +50,7 @@ func TestDeezerTopPreviewsForDisambiguates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/artist":
-			w.Write([]byte(`{"data":[{"id":1},{"id":2}]}`)) // id 1 = most relevant (wrong band)
+			w.Write([]byte(`{"data":[{"id":1,"name":"Incubus"},{"id":2,"name":"Incubus"}]}`)) // id 1 = most relevant (wrong band)
 		case "/artist/1/top":
 			w.Write([]byte(`{"data":[{"title":"Blaspheming Prophets","preview":"http://x/bp.mp3","duration":200,"album":{"title":"Serpent Temptation"}}]}`))
 		case "/artist/2/top":
@@ -79,7 +79,7 @@ func TestDeezerTopPreviewsForFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/artist":
-			w.Write([]byte(`{"data":[{"id":1},{"id":2}]}`))
+			w.Write([]byte(`{"data":[{"id":1,"name":"Incubus"},{"id":2,"name":"Incubus"}]}`))
 		case "/artist/1/top":
 			w.Write([]byte(`{"data":[{"title":"Blaspheming Prophets","preview":"http://x/bp.mp3","duration":200,"album":{"title":"Serpent Temptation"}}]}`))
 		default:
@@ -106,7 +106,7 @@ func TestDeezerTopPreviewsForDropsMismatchedAlbums(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/artist":
-			w.Write([]byte(`{"data":[{"id":7}]}`))
+			w.Write([]byte(`{"data":[{"id":7,"name":"Imagine Dragons"}]}`))
 		case "/artist/7/top":
 			w.Write([]byte(`{"data":[
 				{"title":"Demons","preview":"http://x/1.mp3","duration":175,"album":{"title":"Night Visions"}},
@@ -145,14 +145,19 @@ func TestDeezerTopPreviewsForDropsMismatchedAlbums(t *testing.T) {
 	}
 }
 
-// If the discography is present but nothing overlaps (thin or oddly-titled
-// MusicBrainz data), fall back to the unfiltered list rather than showing an
-// empty Top Tracks section.
-func TestDeezerTopPreviewsForNoOverlapKeepsList(t *testing.T) {
+// If the discography is present but nothing overlaps, return nothing.
+//
+// This test used to assert the opposite — "fall back to the unfiltered list
+// rather than showing an empty Top Tracks section" — and that fallback is
+// what shipped an unrelated artist's single track as RED's top tracks. It
+// defeated the filter in precisely the case the filter existed for. An empty
+// section is the honest answer; preview.go can then fall through to data
+// keyed by MBID, which cannot name-collide.
+func TestDeezerTopPreviewsForNoOverlapReturnsNothing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/artist":
-			w.Write([]byte(`{"data":[{"id":9}]}`))
+			w.Write([]byte(`{"data":[{"id":9,"name":"Obscure Band"}]}`))
 		case "/artist/9/top":
 			w.Write([]byte(`{"data":[{"title":"Some Song","preview":"http://x/s.mp3","duration":200,"album":{"title":"Unlisted Release"}}]}`))
 		default:
@@ -167,8 +172,8 @@ func TestDeezerTopPreviewsForNoOverlapKeepsList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tracks) != 1 || tracks[0].Title != "Some Song" {
-		t.Fatalf("expected unfiltered fallback, got %+v", tracks)
+	if len(tracks) != 0 {
+		t.Fatalf("uncorroborated tracks must not be published, got %+v", tracks)
 	}
 }
 
@@ -178,7 +183,7 @@ func TestDeezerTopPreviewsForRespectsLimit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/artist":
-			w.Write([]byte(`{"data":[{"id":3}]}`))
+			w.Write([]byte(`{"data":[{"id":3,"name":"Band"}]}`))
 		case "/artist/3/top":
 			if got := r.URL.Query().Get("limit"); got != "20" {
 				t.Errorf("expected an over-fetch of 20, got limit=%s", got)
