@@ -84,19 +84,48 @@ func (d *Deezer) SearchTracks(ctx context.Context, query string, limit int) ([]D
 	return out, nil
 }
 
-// AlbumPreviews finds an album by artist+title (a much more precise match
-// than artist name alone) and returns its tracks' 30-second samples.
+// AlbumPreviews finds an album by artist+title and returns its tracks'
+// 30-second samples.
+//
+// Deezer's advanced search does NOT fail closed: when no album matches the
+// artist+album pair it degrades to loose keyword relevance rather than
+// returning nothing, so the top hit can be a completely unrelated release.
+// Common single words are the worst case — artist "Red" + album "Gone"
+// returned another artist's gospel track, which was then rendered as RED's
+// discography. So candidates are verified here rather than trusted: the hit
+// is used only when BOTH its artist name and its title match what was asked
+// for. Same failure mode TopPreviewsFor guards against, one endpoint over.
+//
+// Returning nil on no verified match is deliberate — AlbumTrackList then
+// falls through to the MusicBrainz track list, which is authoritative but
+// carries no samples. A silent-but-correct list beats a playable wrong one.
 func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit int) ([]DeezerTrack, error) {
 	q := `artist:"` + artist + `" album:"` + album + `"`
 	var search struct {
 		Data []struct {
-			ID int64 `json:"id"`
+			ID     int64  `json:"id"`
+			Title  string `json:"title"`
+			Artist struct {
+				Name string `json:"name"`
+			} `json:"artist"`
 		} `json:"data"`
 	}
-	if err := getJSON(ctx, d.lim, deezerBase()+"/search/album?limit=1&q="+url.QueryEscape(q), nil, &search); err != nil {
+	// Over-fetch: the exact release is often ranked below a more "popular"
+	// near-miss, so the right answer can sit at position 2 or 3.
+	if err := getJSON(ctx, d.lim, deezerBase()+"/search/album?limit=5&q="+url.QueryEscape(q), nil, &search); err != nil {
 		return nil, err
 	}
-	if len(search.Data) == 0 {
+	wantArtist, wantAlbum := normAlbum(artist), normAlbum(album)
+	var id int64
+	for _, c := range search.Data {
+		// normAlbum strips trailing "(Deluxe Edition)"-style qualifiers, so a
+		// Deezer deluxe still matches MusicBrainz's standard-edition title.
+		if normAlbum(c.Artist.Name) == wantArtist && normAlbum(c.Title) == wantAlbum {
+			id = c.ID
+			break
+		}
+	}
+	if id == 0 {
 		return nil, nil
 	}
 	var tracks struct {
@@ -107,7 +136,7 @@ func (d *Deezer) AlbumPreviews(ctx context.Context, artist, album string, limit 
 		} `json:"data"`
 	}
 	if err := getJSON(ctx, d.lim,
-		deezerBase()+"/album/"+strconv.FormatInt(search.Data[0].ID, 10)+"/tracks?limit="+fmtInt(limit), nil, &tracks); err != nil {
+		deezerBase()+"/album/"+strconv.FormatInt(id, 10)+"/tracks?limit="+fmtInt(limit), nil, &tracks); err != nil {
 		return nil, err
 	}
 	out := make([]DeezerTrack, 0, len(tracks.Data))
