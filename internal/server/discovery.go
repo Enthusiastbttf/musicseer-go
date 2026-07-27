@@ -59,6 +59,54 @@ func (s *Server) handleTrending(w http.ResponseWriter, r *http.Request, _ *store
 	jsonWrite(w, http.StatusOK, out)
 }
 
+// refreshItemImages repairs the artwork in a stored recommendation payload.
+//
+// The payload snapshots each artist's image at compute time, but the image
+// worker keeps resolving in the background, so entries are joined against the
+// artists table on the way out and cards fill in on refresh rather than
+// waiting for the next recompute.
+//
+// A snapshotted Deezer placeholder is treated as no artwork at all, and is
+// erased even when nothing replaces it. This is what v2.13.5 missed: clearing
+// the artists table cannot reach inside a JSON payload, and the old join only
+// touched entries whose imageUrl was empty, so a silhouette baked into a
+// payload survived the purge and every future fix until the next full
+// recompute. Blanking it lets the frontend draw its own placeholder, which is
+// honest about not knowing rather than asserting a face.
+//
+// lookup is injected so this stays testable without a live store.
+func refreshItemImages(items []map[string]any, lookup func(names []string) map[string]*store.Artist) {
+	var missing []string
+	for _, it := range items {
+		img, _ := it["imageUrl"].(string)
+		if !clients.DeezerPlaceholderImage(img) {
+			continue
+		}
+		it["imageUrl"] = ""
+		if name, _ := it["name"].(string); name != "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	meta := lookup(missing)
+	for _, it := range items {
+		if img, _ := it["imageUrl"].(string); img != "" {
+			continue
+		}
+		name, _ := it["name"].(string)
+		if name == "" {
+			continue
+		}
+		// Guard the replacement too: the artists table may not have been
+		// purged yet on an instance that has not restarted.
+		if m := meta[strings.ToLower(name)]; m != nil && !clients.DeezerPlaceholderImage(m.ImageURL) {
+			it["imageUrl"] = m.ImageURL
+		}
+	}
+}
+
 // serveRecs returns precomputed recommendations (stale-while-revalidate).
 func (s *Server) serveRecs(w http.ResponseWriter, r *http.Request, u *store.User, kind string) {
 	limit := queryLimit(r, 20, 60)
@@ -81,30 +129,13 @@ func (s *Server) serveRecs(w http.ResponseWriter, r *http.Request, u *store.User
 		items = items[:limit]
 	}
 
-	// The payload snapshots artwork at compute time, but the image worker
-	// keeps resolving in the background — join the latest images in live so
-	// cards fill in on refresh instead of waiting for the next recompute.
-	var missing []string
-	for _, it := range items {
-		if s, _ := it["imageUrl"].(string); s == "" {
-			if name, _ := it["name"].(string); name != "" {
-				missing = append(missing, name)
-			}
+	refreshItemImages(items, func(names []string) map[string]*store.Artist {
+		meta, err := s.st.ArtistsByNames(names)
+		if err != nil {
+			return nil
 		}
-	}
-	if len(missing) > 0 {
-		if meta, err := s.st.ArtistsByNames(missing); err == nil {
-			for _, it := range items {
-				if img, _ := it["imageUrl"].(string); img == "" {
-					if name, _ := it["name"].(string); name != "" {
-						if m := meta[strings.ToLower(name)]; m != nil && m.ImageURL != "" {
-							it["imageUrl"] = m.ImageURL
-						}
-					}
-				}
-			}
-		}
-	}
+		return meta
+	})
 
 	jsonWrite(w, http.StatusOK, map[string]any{
 		"items":      items,

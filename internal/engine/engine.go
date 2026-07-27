@@ -531,6 +531,13 @@ func (e *Engine) ComputeRecommendations(ctx context.Context, userID int64) error
 		var image string
 		if m != nil {
 			listeners, genres, image = m.Listeners, m.Genres, m.ImageURL
+			// Never snapshot a placeholder into the payload. A stored payload
+			// is only ever patched where the image is missing, so a silhouette
+			// baked in here outlives any later cleanup of the artists table.
+			// Blanking it also re-queues the lookup just below.
+			if clients.DeezerPlaceholderImage(image) {
+				image = ""
+			}
 		} else {
 			// Unknown artist: remember it and queue an image lookup for next time.
 			e.st.UpsertArtist(&store.Artist{Name: c.name, MBID: c.mbid})
