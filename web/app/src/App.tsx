@@ -85,7 +85,14 @@ export default function App() {
             <Route path="/artist/:mbid" element={<Artist />} />
             <Route path="/genre/:name" element={<Genre />} />
             <Route path="/requests" element={<Requests />} />
-            {user.role === 'admin' && <Route path="/admin" element={<Admin />} />}
+            {user.role === 'admin' && (
+              <>
+                {/* The admin section lives at /admin/:tab so each panel is
+                    linkable; bare /admin lands on the default. */}
+                <Route path="/admin" element={<Navigate to="/admin/instances" replace />} />
+                <Route path="/admin/:tab" element={<Admin />} />
+              </>
+            )}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         )}

@@ -6,7 +6,7 @@ import { useAuth } from '../App'
 const statusStyle: Record<string, string> = {
   pending: 'bg-amber-500/10 text-amber-400',
   approved: 'bg-sky-500/10 text-sky-400',
-  sent: 'bg-emerald-500/10 text-emerald-400',
+  sent: 'bg-green-500/10 text-green-400',
   rejected: 'bg-slate-500/10 text-slate-400',
   failed: 'bg-red-500/10 text-red-400',
 }
@@ -83,7 +83,7 @@ export default function Requests() {
                   {r.status === 'pending' && (
                     <>
                       <button className="btn-ghost !px-2.5" title="Approve & send to Lidarr" onClick={() => act(r.id, 'approve')}>
-                        <Check size={15} className="text-emerald-400" />
+                        <Check size={15} className="text-green-400" />
                       </button>
                       <button className="btn-ghost !px-2.5" title="Reject" onClick={() => act(r.id, 'reject')}>
                         <X size={15} className="text-red-400" />

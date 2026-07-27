@@ -164,7 +164,7 @@ export default function Artist() {
             )}
             {detail.inLibrary ? (
               <span
-                className="btn bg-emerald-500/10 text-emerald-400 cursor-default"
+                className="btn bg-green-500/10 text-green-400 cursor-default"
                 title={
                   ownedCount > 0
                     ? `${ownedCount} of ${totalReleases} releases on this page are in your library`
@@ -184,7 +184,7 @@ export default function Artist() {
               />
             )}
           </div>
-          {batchMsg && <p className="text-sm text-emerald-400 mt-2">{batchMsg}</p>}
+          {batchMsg && <p className="text-sm text-green-400 mt-2">{batchMsg}</p>}
           {bio && (
             <p className="text-sm text-slate-400 mt-4 max-w-3xl leading-relaxed">
               {bioOpen ? bio : shortBio}{' '}
@@ -361,7 +361,7 @@ function TopTracks({ artist, albums, mbid }: { artist: string; albums: AlbumEntr
               onClick={() => playUrl(key, t.preview)}
               className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-white/5 transition-colors"
             >
-              <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-white' : 'bg-white/10 text-slate-300'}`}>
+              <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-accent-ink' : 'bg-white/10 text-slate-300'}`}>
                 {active ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
               </span>
               <span className="min-w-0 flex-1">
@@ -428,7 +428,7 @@ function AlbumCard({ album, artist, onShowTracks }: { album: AlbumEntry; artist:
           </div>
         )}
         {album.owned && (
-          <span className="absolute top-2 right-2 text-[10px] font-bold bg-emerald-500/90 text-black rounded-md px-1.5 py-0.5">
+          <span className="absolute top-2 right-2 text-[10px] font-bold bg-green-500/90 text-black rounded-md px-1.5 py-0.5">
             {album.percent && album.percent < 100 ? `${Math.round(album.percent)}%` : 'OWNED'}
           </span>
         )}
@@ -437,7 +437,7 @@ function AlbumCard({ album, artist, onShowTracks }: { album: AlbumEntry; artist:
             onClick={togglePreview}
             title="Play a 30-second sample from this album"
             className={`absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center transition-opacity shadow-lg ${
-              playing ? 'bg-accent text-white opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
+              playing ? 'bg-accent text-accent-ink opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
             }`}
           >
             {previewBusy ? (
@@ -464,7 +464,7 @@ function AlbumCard({ album, artist, onShowTracks }: { album: AlbumEntry; artist:
       <div className="text-xs text-slate-500 mb-2">{album.year || '—'}</div>
       <div className="mt-auto">
         {album.owned ? (
-          <span className="btn w-full justify-center bg-emerald-500/10 text-emerald-400 cursor-default !py-1.5 text-xs">
+          <span className="btn w-full justify-center bg-green-500/10 text-green-400 cursor-default !py-1.5 text-xs">
             <Check size={13} /> In library
           </span>
         ) : (
@@ -529,7 +529,7 @@ function TrackListModal({ album, artist, onClose }: { album: AlbumEntry; artist:
             <h3 className="font-bold leading-tight">{album.title}</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               {artist.name} · {album.year || '—'} · {album.type}
-              {album.owned && <span className="text-emerald-400 ml-2">in library{album.percent && album.percent < 100 ? ` (${Math.round(album.percent)}%)` : ''}</span>}
+              {album.owned && <span className="text-green-400 ml-2">in library{album.percent && album.percent < 100 ? ` (${Math.round(album.percent)}%)` : ''}</span>}
             </p>
           </div>
           <button className="btn-ghost !px-2.5" onClick={onClose}>
@@ -550,7 +550,7 @@ function TrackListModal({ album, artist, onClose }: { album: AlbumEntry; artist:
                 {t.preview ? (
                   <button
                     onClick={() => playUrl(key, t.preview!)}
-                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-white' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${active ? 'bg-accent text-accent-ink' : 'bg-white/10 text-slate-300 hover:bg-white/20'}`}
                   >
                     {active ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
                   </button>

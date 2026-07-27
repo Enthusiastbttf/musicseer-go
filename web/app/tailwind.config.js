@@ -6,7 +6,9 @@ export default {
       colors: {
         base: '#070b12',
         panel: '#0d131d',
-        accent: '#8b5cf6',
+        accent: '#2dd4bf',
+        'accent-hover': '#5eead4',
+        'accent-ink': '#04211e',
       },
     },
   },

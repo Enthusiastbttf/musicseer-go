@@ -103,7 +103,7 @@ export default function Search() {
               key={m}
               onClick={() => setMode(m)}
               className={`px-4 py-1.5 rounded-md capitalize transition-colors ${
-                mode === m ? 'bg-accent text-white' : 'text-slate-300 hover:text-white'
+                mode === m ? 'bg-accent text-accent-ink' : 'text-slate-300 hover:text-white'
               }`}
             >
               {m}
@@ -171,7 +171,7 @@ function TrackRow({ track, rowKey }: { track: TrackHit; rowKey: string }) {
         </div>
       </div>
       {track.inLibrary ? (
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 shrink-0">
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 shrink-0">
           In library
         </span>
       ) : track.requested ? (

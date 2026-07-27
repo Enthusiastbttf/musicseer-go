@@ -90,7 +90,7 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
             onClick={togglePreview}
             title="Play a 30-second sample (matched by artist name — for identically-named artists, use the album play buttons on the artist page instead)"
             className={`absolute bottom-2 right-2 w-9 h-9 rounded-full flex items-center justify-center transition-opacity shadow-lg ${
-              playing ? 'bg-accent text-white opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
+              playing ? 'bg-accent text-accent-ink opacity-100' : 'bg-black/70 text-white opacity-0 group-hover:opacity-100'
             }`}
           >
             {previewBusy ? (
@@ -117,7 +117,7 @@ export default function ArtistCard({ artist }: { artist: ArtistItem }) {
       </div>
       <div className="mt-3">
         {artist.inLibrary ? (
-          <span className="btn w-full justify-center bg-emerald-500/10 text-emerald-400 cursor-default">
+          <span className="btn w-full justify-center bg-green-500/10 text-green-400 cursor-default">
             <Check size={15} /> In library
           </span>
         ) : state === 'requested' ? (

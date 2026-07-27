@@ -1,25 +1,25 @@
 import { ArrowUpCircle, CheckCircle2, Plug, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { Navigate, useParams } from 'react-router-dom'
+import { DEFAULT_ADMIN_TAB, isAdminTab } from '../adminTabs'
 import { api, ApiError, Instance, User } from '../api'
 import { useAuth } from '../App'
 
-type Tab = 'instances' | 'users' | 'connections' | 'status'
-
 export default function Admin() {
-  const [tab, setTab] = useState<Tab>('instances')
+  // The active section comes from the URL, not local state, so a refresh or a
+  // Back press keeps you where you were and every panel can be linked to.
+  const { tab } = useParams<{ tab: string }>()
+  // An unknown section (typo, stale bookmark) falls back instead of rendering
+  // a heading with nothing under it.
+  if (!isAdminTab(tab)) return <Navigate to={`/admin/${DEFAULT_ADMIN_TAB}`} replace />
+
   return (
     <div className="space-y-6 max-w-5xl">
-      <h1 className="text-2xl font-bold">Admin</h1>
-      <div className="flex gap-2">
-        {(['instances', 'users', 'connections', 'status'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`btn capitalize ${tab === t ? 'bg-accent text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-          >
-            {t}
-          </button>
-        ))}
+      {/* The sidebar sub-nav is the section switcher now, so this is a
+          you-are-here heading rather than a second row of buttons. */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Admin</p>
+        <h1 className="text-2xl font-bold capitalize">{tab}</h1>
       </div>
       {tab === 'instances' && <Instances />}
       {tab === 'users' && <Users />}
@@ -416,7 +416,7 @@ function LastfmConfig() {
       <div className="text-sm">
         <span className="text-slate-400">Status:</span>{' '}
         {config.configured ? (
-          <span className="text-emerald-400 font-semibold">
+          <span className="text-green-400 font-semibold">
             active{config.source === 'env' ? ' (from environment variable)' : ' (configured here)'}
           </span>
         ) : (
@@ -518,7 +518,7 @@ function PlexConfig() {
         {config.machineId ? (
           <div className="text-sm">
             <span className="text-slate-400">Server:</span> <b>{config.serverName || config.machineId}</b>
-            <span className={`ml-3 text-xs font-semibold rounded-md px-2 py-0.5 ${config.enabled ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+            <span className={`ml-3 text-xs font-semibold rounded-md px-2 py-0.5 ${config.enabled ? 'bg-green-500/10 text-green-400' : 'bg-amber-500/10 text-amber-400'}`}>
               {config.enabled ? 'enabled' : 'disabled'}
             </span>
           </div>
@@ -697,7 +697,7 @@ function UpdateCard({ current }: { current: string }) {
             Version <b>v{info.latest}</b> is available (you're on v{current}).
           </p>
           <div className="flex items-center gap-2">
-            <button className="btn bg-accent text-white" onClick={apply} disabled={updating}>
+            <button className="btn bg-accent text-accent-ink" onClick={apply} disabled={updating}>
               {updating ? <RefreshCw size={14} className="animate-spin" /> : <ArrowUpCircle size={14} />}
               {updating ? 'Updating…' : `Update to v${info.latest}`}
             </button>
@@ -710,7 +710,7 @@ function UpdateCard({ current }: { current: string }) {
         </>
       ) : info ? (
         <p className="text-sm text-slate-400 flex items-center gap-2">
-          <CheckCircle2 size={15} className="text-emerald-500" /> You're on the latest version (v{current}).
+          <CheckCircle2 size={15} className="text-green-500" /> You're on the latest version (v{current}).
         </p>
       ) : (
         <p className="text-sm text-slate-500">{checking ? 'Checking for updates…' : 'Update status unavailable.'}</p>

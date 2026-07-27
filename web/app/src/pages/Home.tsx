@@ -5,6 +5,11 @@ import { api, ArtistItem, RecsResponse } from '../api'
 import { useAuth } from '../App'
 import ArtistCard from '../components/ArtistCard'
 
+// Both Discover sections show this many artists. The grid runs at 2 / 3 / 4 / 6
+// columns across the breakpoints, so only multiples of 12 fill their last row at
+// every width — 10 or 18 leave an orphaned tile that reads as a rendering bug.
+const SECTION_LIMIT = 12
+
 interface ListeningInfo {
   linked: boolean
   lastfmUser: string
@@ -58,7 +63,7 @@ function ListeningBanner() {
         <p className="text-slate-400 mt-0.5">
           They’re based only on your library. Link a Last.fm account to base them on what you actually play.{' '}
           {user?.role === 'admin' ? (
-            <Link to="/admin" className="text-accent hover:underline">
+            <Link to="/admin/users" className="text-accent hover:underline">
               Link it in Admin → Users →
             </Link>
           ) : (
@@ -115,7 +120,7 @@ function Section({
 function SkeletonRow() {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-      {Array.from({ length: 6 }).map((_, i) => (
+      {Array.from({ length: SECTION_LIMIT }).map((_, i) => (
         <div key={i} className="card p-3">
           <div className="aspect-square rounded-xl bg-white/5 animate-pulse mb-3" />
           <div className="h-3.5 bg-white/5 rounded animate-pulse mb-2" />
@@ -196,9 +201,9 @@ export default function Home() {
   // Both sections come out of SQLite server-side, so they load in
   // milliseconds — no spinner marathon like the old app.
   useEffect(() => {
-    api.get<ArtistItem[]>('/api/discovery/trending?limit=18')
+    api.get<ArtistItem[]>(`/api/discovery/trending?limit=${SECTION_LIMIT}`)
       .then(setTrending).catch(() => {}).finally(() => setLoadingTrending(false))
-    api.get<RecsResponse>('/api/discovery/recommendations?limit=18')
+    api.get<RecsResponse>(`/api/discovery/recommendations?limit=${SECTION_LIMIT}`)
       .then(setRecs).catch(() => {}).finally(() => setLoadingRecs(false))
   }, [])
 
@@ -206,7 +211,7 @@ export default function Home() {
   useEffect(() => {
     if (!recs?.computing) return
     const t = setInterval(async () => {
-      const r = await api.get<RecsResponse>('/api/discovery/recommendations?limit=18').catch(() => null)
+      const r = await api.get<RecsResponse>(`/api/discovery/recommendations?limit=${SECTION_LIMIT}`).catch(() => null)
       if (r) setRecs(r)
       if (r && !r.computing) clearInterval(t)
     }, 8000)
