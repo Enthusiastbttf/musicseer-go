@@ -681,8 +681,27 @@ func (e *Engine) imageWorker(ctx context.Context) {
 			continue
 		}
 
-		url, err := e.Deezer.ArtistImage(ctx, job.name)
+		// Deezer has no MBID concept, so it can only match on name — which
+		// silently picks the wrong band for names like "Red". Hand it the
+		// known discography so it can tell same-named artists apart. Read
+		// straight from cache: this is a background worker and a photo is
+		// never worth a MusicBrainz round trip.
+		var known []string
+		if job.mbid != "" {
+			if raw, ok := e.st.ArtistDetailCached(job.mbid, 365*24*time.Hour); ok {
+				var d ArtistDetail
+				if json.Unmarshal(raw, &d) == nil {
+					for _, a := range d.Albums {
+						known = append(known, a.Title)
+					}
+				}
+			}
+		}
+
+		url, err := e.Deezer.ArtistImageFor(ctx, job.name, known)
 		if err != nil || url == "" {
+			// TheAudioDB is looked up by MBID when we have one, so it cannot
+			// pick a different artist with the same name.
 			url, _ = e.AudioDB.ArtistImage(ctx, job.name, job.mbid)
 		}
 		if url != "" {

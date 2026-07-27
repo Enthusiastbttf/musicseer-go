@@ -325,26 +325,119 @@ func normAlbum(s string) string {
 	return b.String()
 }
 
-func (d *Deezer) ArtistImage(ctx context.Context, name string) (string, error) {
-	var resp struct {
-		Data []struct {
-			Name      string `json:"name"`
-			PictureXL string `json:"picture_xl"`
-			PictureBg string `json:"picture_big"`
-			PictureMd string `json:"picture_medium"`
-		} `json:"data"`
-	}
-	err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit=1&q="+url.QueryEscape(name), nil, &resp)
-	if err != nil || len(resp.Data) == 0 {
-		return "", err
-	}
-	a := resp.Data[0]
-	for _, u := range []string{a.PictureXL, a.PictureBg, a.PictureMd} {
+// deezerArtistHit is one /search/artist result, with the picture sizes we
+// fall back through.
+type deezerArtistHit struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	PictureXL string `json:"picture_xl"`
+	PictureBg string `json:"picture_big"`
+	PictureMd string `json:"picture_medium"`
+}
+
+// picture returns the largest available image, or "" when Deezer has none.
+func (h deezerArtistHit) picture() string {
+	for _, u := range []string{h.PictureXL, h.PictureBg, h.PictureMd} {
 		if u != "" {
-			return u, nil
+			return u
 		}
 	}
-	return "", nil
+	return ""
+}
+
+func (d *Deezer) searchArtists(ctx context.Context, name string, limit int) ([]deezerArtistHit, error) {
+	var resp struct {
+		Data []deezerArtistHit `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim, deezerBase()+"/search/artist?limit="+fmtInt(limit)+"&q="+url.QueryEscape(name), nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
+// artistAlbumTitles returns the titles of one Deezer artist's releases, used
+// to tell same-named artists apart.
+func (d *Deezer) artistAlbumTitles(ctx context.Context, id int64, limit int) ([]string, error) {
+	var resp struct {
+		Data []struct {
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	if err := getJSON(ctx, d.lim,
+		deezerBase()+"/artist/"+strconv.FormatInt(id, 10)+"/albums?limit="+fmtInt(limit), nil, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(resp.Data))
+	for _, a := range resp.Data {
+		out = append(out, a.Title)
+	}
+	return out, nil
+}
+
+// ArtistImage looks up an artist photo by name alone. Prefer ArtistImageFor,
+// which can tell same-named artists apart.
+func (d *Deezer) ArtistImage(ctx context.Context, name string) (string, error) {
+	return d.ArtistImageFor(ctx, name, nil)
+}
+
+// ArtistImageFor returns an artist photo, using knownAlbums (the artist's
+// MusicBrainz discography) to pick between artists that share a name.
+//
+// Deezer ranks /search/artist by popularity, not by string match, and the
+// previous code took the first hit unverified — so a search for "Red" could
+// return Redbone's photo, and even an exact hit could be a different band
+// called Red. Two guards, cheapest first:
+//
+//  1. Drop hits whose name isn't the one asked for. This alone kills the
+//     fuzzy near-misses and costs nothing extra.
+//  2. If several real artists genuinely share the name, fetch each one's
+//     releases and keep the one overlapping the known discography. Only
+//     ambiguous names pay for this, so the common case stays a single call.
+//
+// Returns "" rather than guessing when nothing verifies. That is deliberate:
+// the caller falls back to TheAudioDB keyed by MBID, which cannot pick the
+// wrong artist, and a missing photo degrades to a placeholder while a wrong
+// one silently misinforms.
+func (d *Deezer) ArtistImageFor(ctx context.Context, name string, knownAlbums []string) (string, error) {
+	hits, err := d.searchArtists(ctx, name, 5)
+	if err != nil || len(hits) == 0 {
+		return "", err
+	}
+
+	wantName := normAlbum(name) // same normalizer: lowercase, alphanumerics only
+	var exact []deezerArtistHit
+	for _, h := range hits {
+		if normAlbum(h.Name) == wantName && h.picture() != "" {
+			exact = append(exact, h)
+		}
+	}
+	if len(exact) == 0 {
+		return "", nil
+	}
+	if len(exact) == 1 || len(knownAlbums) == 0 {
+		// Unambiguous, or no discography to disambiguate with. Deezer's own
+		// relevance order is the best signal left.
+		return exact[0].picture(), nil
+	}
+
+	known := make(map[string]struct{}, len(knownAlbums))
+	for _, a := range knownAlbums {
+		if k := normAlbum(a); k != "" {
+			known[k] = struct{}{}
+		}
+	}
+	for _, h := range exact {
+		titles, err := d.artistAlbumTitles(ctx, h.ID, 50)
+		if err != nil {
+			continue
+		}
+		for _, t := range titles {
+			if _, ok := known[normAlbum(t)]; ok {
+				return h.picture(), nil
+			}
+		}
+	}
+	return "", nil // several same-named artists, none provably this one
 }
 
 // TheAudioDB: fallback image source (free tier key "2").
