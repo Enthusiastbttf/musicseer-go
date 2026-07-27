@@ -171,7 +171,10 @@ func (e *Engine) SyncTrending(ctx context.Context) error {
 		}
 		for _, a := range top {
 			chart = append(chart, chartEntry{a.Name, "", 0, 0})
-			if a.Picture != "" {
+			// Skip Deezer's grey-silhouette default: storing it would look
+			// like a resolved photo and stop the image worker from ever
+			// trying TheAudioDB for this artist.
+			if !clients.DeezerPlaceholderImage(a.Picture) {
 				e.st.SetArtistImage(a.Name, a.Picture)
 			}
 		}

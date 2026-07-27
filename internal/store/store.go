@@ -161,11 +161,26 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	// v2.13.4: Deezer returns a loadable CDN URL with the image hash segment
+	// missing when it has no photo, which renders as a grey silhouette. Those
+	// were stored as if they were real, so the artist never fell through to
+	// TheAudioDB. Targeted rather than wholesale: only rows holding such a URL
+	// are cleared, so this does not restart the v2 backfill from scratch.
+	if userVersion < 3 {
+		if _, err := db.Exec(
+			`UPDATE artists SET image_url=NULL, image_checked_at=NULL
+			 WHERE image_url LIKE '%/images/artist//%'`); err != nil {
+			return err
+		}
+		if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // schemaVersion is the PRAGMA user_version a fully-migrated database carries.
-const schemaVersion = 2
+const schemaVersion = 3
 
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 

@@ -356,10 +356,38 @@ type deezerArtistHit struct {
 	PictureMd string `json:"picture_medium"`
 }
 
-// picture returns the largest available image, or "" when Deezer has none.
+// DeezerPlaceholderImage reports whether a Deezer image URL is its "no
+// picture" default rather than a real photo.
+//
+// Deezer does not return an empty string for an artist it has no image for.
+// It returns a normally-formed, perfectly loadable CDN URL with the image
+// hash segment simply missing:
+//
+//	https://e-cdns-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg
+//	                                            ^^ no hash
+//
+// That renders as a grey silhouette on white, which looked like a real photo
+// to every caller here and pinned itself to artists that should have fallen
+// through to TheAudioDB. The empty path segment is the tell, so this checks
+// the path (after the scheme) for an empty component rather than matching a
+// hostname or size that Deezer is free to change.
+func DeezerPlaceholderImage(u string) bool {
+	if u == "" {
+		return true
+	}
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	}
+	return strings.Contains(u, "//")
+}
+
+// picture returns the largest real image, or "" when Deezer has none. A
+// placeholder counts as none: a missing photo degrades to the app's own
+// avatar, while Deezer's silhouette masquerades as a resolved one and stops
+// the MBID-keyed fallback from ever being tried.
 func (h deezerArtistHit) picture() string {
 	for _, u := range []string{h.PictureXL, h.PictureBg, h.PictureMd} {
-		if u != "" {
+		if !DeezerPlaceholderImage(u) {
 			return u
 		}
 	}

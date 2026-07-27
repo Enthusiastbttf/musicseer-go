@@ -240,3 +240,60 @@ func TestArtistImageNonLatinNamesDoNotCollide(t *testing.T) {
 		t.Fatalf("distinct non-Latin names must not share a photo, got %q", got)
 	}
 }
+
+// Deezer returns a loadable CDN URL with the image hash segment missing when
+// it has no photo for an artist, e.g.
+// https://e-cdns-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg
+// which renders as a grey silhouette. It looked like a resolved photo to
+// every caller and blocked the MBID-keyed fallback.
+func TestDeezerPlaceholderImage(t *testing.T) {
+	cases := []struct {
+		url         string
+		placeholder bool
+	}{
+		{"", true},
+		{"https://e-cdns-images.dzcdn.net/images/artist//250x250-000000-80-0-0.jpg", true},
+		{"https://cdn-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg", true},
+		{"http://e-cdns-images.dzcdn.net/images/artist//56x56-000000-80-0-0.jpg", true},
+		{"https://e-cdns-images.dzcdn.net/images/artist/1a2b3c/250x250-000000-80-0-0.jpg", false},
+		{"https://e-cdns-images.dzcdn.net/images/cover/abc/500x500.jpg", false},
+	}
+	for _, c := range cases {
+		if got := DeezerPlaceholderImage(c.url); got != c.placeholder {
+			t.Errorf("DeezerPlaceholderImage(%q) = %v, want %v", c.url, got, c.placeholder)
+		}
+	}
+}
+
+// A hit whose only picture is Deezer's silhouette is not a usable candidate:
+// it must yield nothing so the caller falls through to TheAudioDB.
+func TestArtistImageRejectsDeezerPlaceholder(t *testing.T) {
+	artistImageServer(t, `{"data":[
+		{"id":1,"name":"Coldplay","picture_xl":"https://e-cdns-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"}
+	]}`, nil)
+
+	got, err := NewDeezer().ArtistImageFor(context.Background(), "Coldplay", []string{"Parachutes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("Deezer's silhouette must not count as a photo, got %q", got)
+	}
+}
+
+// Sizes still degrade largest-first, skipping placeholders on the way down.
+func TestArtistImageFallsPastPlaceholderToRealSize(t *testing.T) {
+	artistImageServer(t, `{"data":[
+		{"id":1,"name":"Coldplay",
+		 "picture_xl":"https://e-cdns-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg",
+		 "picture_big":"https://e-cdns-images.dzcdn.net/images/artist/real/500x500-000000-80-0-0.jpg"}
+	]}`, nil)
+
+	got, err := NewDeezer().ArtistImageFor(context.Background(), "Coldplay", []string{"Parachutes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://e-cdns-images.dzcdn.net/images/artist/real/500x500-000000-80-0-0.jpg" {
+		t.Fatalf("want the real big-size photo, got %q", got)
+	}
+}

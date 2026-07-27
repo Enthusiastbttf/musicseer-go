@@ -148,3 +148,49 @@ func TestArtistImagePurgeRunsOnce(t *testing.T) {
 		t.Fatalf("a photo written after the purge must survive a restart, got %q", url)
 	}
 }
+
+// v2.13.4: Deezer's grey-silhouette default was stored as a real photo, so
+// the artist never fell through to TheAudioDB. Those rows are cleared, and
+// only those — a wholesale re-purge would restart the v2 backfill.
+func TestDeezerPlaceholderPhotoPurge(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const placeholder = "https://e-cdns-images.dzcdn.net/images/artist//1000x1000-000000-80-0-0.jpg"
+	if err := s.SetArtistImage("Coldplay", placeholder); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetArtistImage("RED", "https://e-cdns-images.dzcdn.net/images/artist/real/500x500.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	// Look like a database that has taken the v2 purge but not this one.
+	if _, err := s.DB.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Close()
+
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.DB.Close()
+
+	var url, checked any
+	if err := s2.DB.QueryRow("SELECT image_url, image_checked_at FROM artists WHERE name='Coldplay'").Scan(&url, &checked); err != nil {
+		t.Fatal(err)
+	}
+	if url != nil || checked != nil {
+		t.Fatalf("silhouette row should be cleared, got url=%v checked=%v", url, checked)
+	}
+
+	// A real photo alongside it must survive: this purge is targeted.
+	var kept string
+	if err := s2.DB.QueryRow("SELECT COALESCE(image_url,'') FROM artists WHERE name='RED'").Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != "https://e-cdns-images.dzcdn.net/images/artist/real/500x500.jpg" {
+		t.Fatalf("real photo must not be purged, got %q", kept)
+	}
+}
